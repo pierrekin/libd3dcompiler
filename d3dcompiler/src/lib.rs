@@ -1348,143 +1348,143 @@ mod linux_loader {
     fn resolve_msvcrt(name: &str) -> usize {
         match name {
             // memory
-            "malloc" => imports::msvcrt::malloc as usize,
-            "free" => imports::msvcrt::free as usize,
-            "memcpy" => imports::msvcrt::memcpy as usize,
-            "memcpy_s" => imports::msvcrt::memcpy_s as usize,
-            "memmove" => imports::msvcrt::memmove as usize,
-            "memset" => imports::msvcrt::memset as usize,
-            "memcmp" => imports::msvcrt::memcmp as usize,
-            "_memicmp" => imports::msvcrt::_memicmp as usize,
+            "malloc" => imports::msvcrt::malloc as *const () as usize,
+            "free" => imports::msvcrt::free as *const () as usize,
+            "memcpy" => imports::msvcrt::memcpy as *const () as usize,
+            "memcpy_s" => imports::msvcrt::memcpy_s as *const () as usize,
+            "memmove" => imports::msvcrt::memmove as *const () as usize,
+            "memset" => imports::msvcrt::memset as *const () as usize,
+            "memcmp" => imports::msvcrt::memcmp as *const () as usize,
+            "_memicmp" => imports::msvcrt::_memicmp as *const () as usize,
 
             // string
-            "strlen" => libc::strlen as usize,
-            "strcmp" => imports::msvcrt::strcmp as usize,
-            "strncmp" => imports::msvcrt::strncmp as usize,
-            "strcpy_s" => imports::msvcrt::strcpy_s as usize,
-            "strncpy_s" => imports::msvcrt::strncpy_s as usize,
-            "strcat_s" => imports::msvcrt::strcat_s as usize,
-            "strchr" => imports::msvcrt::strchr as usize,
-            "strrchr" => imports::msvcrt::strrchr as usize,
-            "strstr" => imports::msvcrt::strstr as usize,
-            "strnlen" => imports::msvcrt::strnlen as usize,
-            "_strdup" => imports::msvcrt::_strdup as usize,
-            "_stricmp" => imports::msvcrt::_stricmp as usize,
-            "_strnicmp" => imports::msvcrt::_strnicmp as usize,
-            "tolower" => imports::msvcrt::tolower as usize,
-            "toupper" => imports::msvcrt::toupper as usize,
-            "towlower" => imports::msvcrt::towlower as usize,
-            "isalnum" => imports::msvcrt::isalnum as usize,
-            "isalpha" => imports::msvcrt::isalpha as usize,
-            "isdigit" => imports::msvcrt::isdigit as usize,
-            "isspace" => imports::msvcrt::isspace as usize,
-            "isxdigit" => imports::msvcrt::isxdigit as usize,
-            "__isascii" => imports::msvcrt::__isascii as usize,
+            "strlen" => libc::strlen as *const () as usize,
+            "strcmp" => imports::msvcrt::strcmp as *const () as usize,
+            "strncmp" => imports::msvcrt::strncmp as *const () as usize,
+            "strcpy_s" => imports::msvcrt::strcpy_s as *const () as usize,
+            "strncpy_s" => imports::msvcrt::strncpy_s as *const () as usize,
+            "strcat_s" => imports::msvcrt::strcat_s as *const () as usize,
+            "strchr" => imports::msvcrt::strchr as *const () as usize,
+            "strrchr" => imports::msvcrt::strrchr as *const () as usize,
+            "strstr" => imports::msvcrt::strstr as *const () as usize,
+            "strnlen" => imports::msvcrt::strnlen as *const () as usize,
+            "_strdup" => imports::msvcrt::_strdup as *const () as usize,
+            "_stricmp" => imports::msvcrt::_stricmp as *const () as usize,
+            "_strnicmp" => imports::msvcrt::_strnicmp as *const () as usize,
+            "tolower" => imports::msvcrt::tolower as *const () as usize,
+            "toupper" => imports::msvcrt::toupper as *const () as usize,
+            "towlower" => imports::msvcrt::towlower as *const () as usize,
+            "isalnum" => imports::msvcrt::isalnum as *const () as usize,
+            "isalpha" => imports::msvcrt::isalpha as *const () as usize,
+            "isdigit" => imports::msvcrt::isdigit as *const () as usize,
+            "isspace" => imports::msvcrt::isspace as *const () as usize,
+            "isxdigit" => imports::msvcrt::isxdigit as *const () as usize,
+            "__isascii" => imports::msvcrt::__isascii as *const () as usize,
 
             // wide string
-            "wcsncmp" => imports::msvcrt::wcsncmp as usize,
-            "wcsncpy_s" => imports::msvcrt::wcsncpy_s as usize,
-            "wcsncat_s" => imports::msvcrt::wcsncat_s as usize,
-            "wcscat_s" => imports::msvcrt::wcscat_s as usize,
-            "wcscpy_s" => imports::msvcrt::wcscpy_s as usize,
-            "wcsrchr" => imports::msvcrt::wcsrchr as usize,
-            "_wcsdup" => imports::msvcrt::_wcsdup as usize,
-            "_wcsicmp" => imports::msvcrt::_wcsicmp as usize,
-            "_wcsnicmp" => imports::msvcrt::_wcsnicmp as usize,
-            "_mbscmp" => imports::msvcrt::_mbscmp as usize,
-            "_mbstrlen" => imports::msvcrt::_mbstrlen as usize,
+            "wcsncmp" => imports::msvcrt::wcsncmp as *const () as usize,
+            "wcsncpy_s" => imports::msvcrt::wcsncpy_s as *const () as usize,
+            "wcsncat_s" => imports::msvcrt::wcsncat_s as *const () as usize,
+            "wcscat_s" => imports::msvcrt::wcscat_s as *const () as usize,
+            "wcscpy_s" => imports::msvcrt::wcscpy_s as *const () as usize,
+            "wcsrchr" => imports::msvcrt::wcsrchr as *const () as usize,
+            "_wcsdup" => imports::msvcrt::_wcsdup as *const () as usize,
+            "_wcsicmp" => imports::msvcrt::_wcsicmp as *const () as usize,
+            "_wcsnicmp" => imports::msvcrt::_wcsnicmp as *const () as usize,
+            "_mbscmp" => imports::msvcrt::_mbscmp as *const () as usize,
+            "_mbstrlen" => imports::msvcrt::_mbstrlen as *const () as usize,
 
             // printf/scanf
-            "sprintf_s" => imports::msvcrt::sprintf_s as usize,
-            "sscanf_s" => imports::msvcrt::sscanf_s as usize,
-            "swprintf_s" => imports::msvcrt::swprintf_s as usize,
-            "_vsnprintf" => imports::msvcrt::_vsnprintf as usize,
-            "_vsnwprintf" => imports::msvcrt::_vsnwprintf as usize,
-            "_snwprintf_s" => imports::msvcrt::_snwprintf_s as usize,
+            "sprintf_s" => imports::msvcrt::sprintf_s as *const () as usize,
+            "sscanf_s" => imports::msvcrt::sscanf_s as *const () as usize,
+            "swprintf_s" => imports::msvcrt::swprintf_s as *const () as usize,
+            "_vsnprintf" => imports::msvcrt::_vsnprintf as *const () as usize,
+            "_vsnwprintf" => imports::msvcrt::_vsnwprintf as *const () as usize,
+            "_snwprintf_s" => imports::msvcrt::_snwprintf_s as *const () as usize,
 
             // file I/O
-            "fclose" => imports::msvcrt::fclose as usize,
-            "fread" => imports::msvcrt::fread as usize,
-            "fseek" => imports::msvcrt::fseek as usize,
-            "ftell" => imports::msvcrt::ftell as usize,
-            "_wfsopen" => imports::msvcrt::_wfsopen as usize,
-            "_fileno" => imports::msvcrt::_fileno as usize,
-            "_filelengthi64" => imports::msvcrt::_filelengthi64 as usize,
-            "_read" => imports::msvcrt::_read as usize,
-            "_write" => imports::msvcrt::_write as usize,
-            "_close" => imports::msvcrt::_close as usize,
-            "_lseeki64" => imports::msvcrt::_lseeki64 as usize,
-            "_chsize_s" => imports::msvcrt::_chsize_s as usize,
-            "_get_osfhandle" => imports::msvcrt::_get_osfhandle as usize,
-            "_open_osfhandle" => imports::msvcrt::_open_osfhandle as usize,
+            "fclose" => imports::msvcrt::fclose as *const () as usize,
+            "fread" => imports::msvcrt::fread as *const () as usize,
+            "fseek" => imports::msvcrt::fseek as *const () as usize,
+            "ftell" => imports::msvcrt::ftell as *const () as usize,
+            "_wfsopen" => imports::msvcrt::_wfsopen as *const () as usize,
+            "_fileno" => imports::msvcrt::_fileno as *const () as usize,
+            "_filelengthi64" => imports::msvcrt::_filelengthi64 as *const () as usize,
+            "_read" => imports::msvcrt::_read as *const () as usize,
+            "_write" => imports::msvcrt::_write as *const () as usize,
+            "_close" => imports::msvcrt::_close as *const () as usize,
+            "_lseeki64" => imports::msvcrt::_lseeki64 as *const () as usize,
+            "_chsize_s" => imports::msvcrt::_chsize_s as *const () as usize,
+            "_get_osfhandle" => imports::msvcrt::_get_osfhandle as *const () as usize,
+            "_open_osfhandle" => imports::msvcrt::_open_osfhandle as *const () as usize,
 
             // math
-            "acos" => imports::msvcrt::acos as usize,
-            "asin" => imports::msvcrt::asin as usize,
-            "atan" => imports::msvcrt::atan as usize,
-            "atan2" => imports::msvcrt::atan2 as usize,
-            "ceil" => imports::msvcrt::ceil as usize,
-            "cos" => imports::msvcrt::cos as usize,
-            "cosh" => imports::msvcrt::cosh as usize,
-            "exp" => imports::msvcrt::exp as usize,
-            "floor" => imports::msvcrt::floor as usize,
-            "floorf" => imports::msvcrt::floorf as usize,
-            "fmod" => imports::msvcrt::fmod as usize,
-            "log" => imports::msvcrt::log as usize,
-            "modf" => imports::msvcrt::modf as usize,
-            "pow" => imports::msvcrt::pow as usize,
-            "sin" => imports::msvcrt::sin as usize,
-            "sinh" => imports::msvcrt::sinh as usize,
-            "sqrt" => imports::msvcrt::sqrt as usize,
-            "tan" => imports::msvcrt::tan as usize,
-            "tanh" => imports::msvcrt::tanh as usize,
-            "_isnan" => imports::msvcrt::_isnan as usize,
-            "_finite" => imports::msvcrt::_finite as usize,
-            "_fpclass" => imports::msvcrt::_fpclass as usize,
-            "_clearfp" => imports::msvcrt::_clearfp as usize,
-            "_controlfp" => imports::msvcrt::_controlfp as usize,
+            "acos" => imports::msvcrt::acos as *const () as usize,
+            "asin" => imports::msvcrt::asin as *const () as usize,
+            "atan" => imports::msvcrt::atan as *const () as usize,
+            "atan2" => imports::msvcrt::atan2 as *const () as usize,
+            "ceil" => imports::msvcrt::ceil as *const () as usize,
+            "cos" => imports::msvcrt::cos as *const () as usize,
+            "cosh" => imports::msvcrt::cosh as *const () as usize,
+            "exp" => imports::msvcrt::exp as *const () as usize,
+            "floor" => imports::msvcrt::floor as *const () as usize,
+            "floorf" => imports::msvcrt::floorf as *const () as usize,
+            "fmod" => imports::msvcrt::fmod as *const () as usize,
+            "log" => imports::msvcrt::log as *const () as usize,
+            "modf" => imports::msvcrt::modf as *const () as usize,
+            "pow" => imports::msvcrt::pow as *const () as usize,
+            "sin" => imports::msvcrt::sin as *const () as usize,
+            "sinh" => imports::msvcrt::sinh as *const () as usize,
+            "sqrt" => imports::msvcrt::sqrt as *const () as usize,
+            "tan" => imports::msvcrt::tan as *const () as usize,
+            "tanh" => imports::msvcrt::tanh as *const () as usize,
+            "_isnan" => imports::msvcrt::_isnan as *const () as usize,
+            "_finite" => imports::msvcrt::_finite as *const () as usize,
+            "_fpclass" => imports::msvcrt::_fpclass as *const () as usize,
+            "_clearfp" => imports::msvcrt::_clearfp as *const () as usize,
+            "_controlfp" => imports::msvcrt::_controlfp as *const () as usize,
 
             // conversion
-            "atoi" => imports::msvcrt::atoi as usize,
-            "atof" => imports::msvcrt::atof as usize,
-            "_atoi64" => imports::msvcrt::_atoi64 as usize,
-            "strtod" => imports::msvcrt::strtod as usize,
-            "strtoul" => imports::msvcrt::strtoul as usize,
-            "wcstoul" => imports::msvcrt::wcstoul as usize,
-            "_strtoui64" => imports::msvcrt::_strtoui64 as usize,
+            "atoi" => imports::msvcrt::atoi as *const () as usize,
+            "atof" => imports::msvcrt::atof as *const () as usize,
+            "_atoi64" => imports::msvcrt::_atoi64 as *const () as usize,
+            "strtod" => imports::msvcrt::strtod as *const () as usize,
+            "strtoul" => imports::msvcrt::strtoul as *const () as usize,
+            "wcstoul" => imports::msvcrt::wcstoul as *const () as usize,
+            "_strtoui64" => imports::msvcrt::_strtoui64 as *const () as usize,
 
             // other
-            "qsort" => imports::msvcrt::qsort as usize,
-            "bsearch" => imports::msvcrt::bsearch as usize,
-            "getenv" => imports::msvcrt::getenv as usize,
-            "_wgetenv" => imports::msvcrt::_wgetenv as usize,
-            "setlocale" => imports::msvcrt::setlocale as usize,
-            "_time64" => imports::msvcrt::_time64 as usize,
-            "_errno" => imports::msvcrt::_errno as usize,
+            "qsort" => imports::msvcrt::qsort as *const () as usize,
+            "bsearch" => imports::msvcrt::bsearch as *const () as usize,
+            "getenv" => imports::msvcrt::getenv as *const () as usize,
+            "_wgetenv" => imports::msvcrt::_wgetenv as *const () as usize,
+            "setlocale" => imports::msvcrt::setlocale as *const () as usize,
+            "_time64" => imports::msvcrt::_time64 as *const () as usize,
+            "_errno" => imports::msvcrt::_errno as *const () as usize,
 
             // CRT init
-            "_initterm" => imports::msvcrt::_initterm as usize,
-            "_amsg_exit" => imports::msvcrt::_amsg_exit as usize,
-            "_purecall" => imports::msvcrt::_purecall as usize,
-            "_onexit" => imports::msvcrt::_onexit as usize,
-            "__dllonexit" => imports::msvcrt::__dllonexit as usize,
-            "_lock" => imports::msvcrt::_lock as usize,
-            "_unlock" => imports::msvcrt::_unlock as usize,
-            "_callnewh" => imports::msvcrt::_callnewh as usize,
+            "_initterm" => imports::msvcrt::_initterm as *const () as usize,
+            "_amsg_exit" => imports::msvcrt::_amsg_exit as *const () as usize,
+            "_purecall" => imports::msvcrt::_purecall as *const () as usize,
+            "_onexit" => imports::msvcrt::_onexit as *const () as usize,
+            "__dllonexit" => imports::msvcrt::__dllonexit as *const () as usize,
+            "_lock" => imports::msvcrt::_lock as *const () as usize,
+            "_unlock" => imports::msvcrt::_unlock as *const () as usize,
+            "_callnewh" => imports::msvcrt::_callnewh as *const () as usize,
 
             // exceptions
-            "__C_specific_handler" => imports::msvcrt::__C_specific_handler as usize,
-            "__CxxFrameHandler3" => imports::msvcrt::__CxxFrameHandler3 as usize,
-            "_CxxThrowException" => imports::msvcrt::_CxxThrowException as usize,
-            "?terminate@@YAXXZ" => imports::msvcrt::terminate as usize,
-            "??1type_info@@UEAA@XZ" => imports::msvcrt::type_info_dtor as usize,
-            "__unDName" => imports::msvcrt::__unDName as usize,
-            "_XcptFilter" => imports::msvcrt::_XcptFilter as usize,
+            "__C_specific_handler" => imports::msvcrt::__C_specific_handler as *const () as usize,
+            "__CxxFrameHandler3" => imports::msvcrt::__CxxFrameHandler3 as *const () as usize,
+            "_CxxThrowException" => imports::msvcrt::_CxxThrowException as *const () as usize,
+            "?terminate@@YAXXZ" => imports::msvcrt::terminate as *const () as usize,
+            "??1type_info@@UEAA@XZ" => imports::msvcrt::type_info_dtor as *const () as usize,
+            "__unDName" => imports::msvcrt::__unDName as *const () as usize,
+            "_XcptFilter" => imports::msvcrt::_XcptFilter as *const () as usize,
 
             // path
-            "_wfullpath" => imports::msvcrt::_wfullpath as usize,
-            "_wmakepath_s" => imports::msvcrt::_wmakepath_s as usize,
-            "_wsplitpath_s" => imports::msvcrt::_wsplitpath_s as usize,
+            "_wfullpath" => imports::msvcrt::_wfullpath as *const () as usize,
+            "_wmakepath_s" => imports::msvcrt::_wmakepath_s as *const () as usize,
+            "_wsplitpath_s" => imports::msvcrt::_wsplitpath_s as *const () as usize,
             _ => 0xDEADBEEF,
         }
     }
@@ -1492,85 +1492,103 @@ mod linux_loader {
     fn resolve_kernel32(name: &str) -> usize {
         match name {
             // memory
-            "VirtualAlloc" => imports::kernel32::VirtualAlloc as usize,
-            "VirtualFree" => imports::kernel32::VirtualFree as usize,
-            "GetProcessHeap" => imports::kernel32::GetProcessHeap as usize,
-            "HeapCreate" => imports::kernel32::HeapCreate as usize,
-            "HeapDestroy" => imports::kernel32::HeapDestroy as usize,
-            "HeapAlloc" => imports::kernel32::HeapAlloc as usize,
-            "HeapFree" => imports::kernel32::HeapFree as usize,
-            "LocalAlloc" => imports::kernel32::LocalAlloc as usize,
-            "LocalFree" => imports::kernel32::LocalFree as usize,
+            "VirtualAlloc" => imports::kernel32::VirtualAlloc as *const () as usize,
+            "VirtualFree" => imports::kernel32::VirtualFree as *const () as usize,
+            "GetProcessHeap" => imports::kernel32::GetProcessHeap as *const () as usize,
+            "HeapCreate" => imports::kernel32::HeapCreate as *const () as usize,
+            "HeapDestroy" => imports::kernel32::HeapDestroy as *const () as usize,
+            "HeapAlloc" => imports::kernel32::HeapAlloc as *const () as usize,
+            "HeapFree" => imports::kernel32::HeapFree as *const () as usize,
+            "LocalAlloc" => imports::kernel32::LocalAlloc as *const () as usize,
+            "LocalFree" => imports::kernel32::LocalFree as *const () as usize,
 
             // file
-            "CreateFileW" => imports::kernel32::CreateFileW as usize,
-            "CreateFileA" => imports::kernel32::CreateFileA as usize,
-            "ReadFile" => imports::kernel32::ReadFile as usize,
-            "WriteFile" => imports::kernel32::WriteFile as usize,
-            "CloseHandle" => imports::kernel32::CloseHandle as usize,
-            "GetFileSize" => imports::kernel32::GetFileSize as usize,
-            "GetFileSizeEx" => imports::kernel32::GetFileSizeEx as usize,
-            "GetFileType" => imports::kernel32::GetFileType as usize,
-            "SetFilePointer" => imports::kernel32::SetFilePointer as usize,
-            "SetFilePointerEx" => imports::kernel32::SetFilePointerEx as usize,
-            "SetEndOfFile" => imports::kernel32::SetEndOfFile as usize,
-            "DeleteFileW" => imports::kernel32::DeleteFileW as usize,
-            "GetFileAttributesW" => imports::kernel32::GetFileAttributesW as usize,
-            "SetFileAttributesW" => imports::kernel32::SetFileAttributesW as usize,
-            "GetFullPathNameW" => imports::kernel32::GetFullPathNameW as usize,
-            "GetFullPathNameA" => imports::kernel32::GetFullPathNameA as usize,
-            "CreateFileMappingW" => imports::kernel32::CreateFileMappingW as usize,
-            "MapViewOfFile" => imports::kernel32::MapViewOfFile as usize,
-            "MapViewOfFileEx" => imports::kernel32::MapViewOfFileEx as usize,
-            "UnmapViewOfFile" => imports::kernel32::UnmapViewOfFile as usize,
-            "FlushViewOfFile" => imports::kernel32::FlushViewOfFile as usize,
-            "DeviceIoControl" => imports::kernel32::DeviceIoControl as usize,
+            "CreateFileW" => imports::kernel32::CreateFileW as *const () as usize,
+            "CreateFileA" => imports::kernel32::CreateFileA as *const () as usize,
+            "ReadFile" => imports::kernel32::ReadFile as *const () as usize,
+            "WriteFile" => imports::kernel32::WriteFile as *const () as usize,
+            "CloseHandle" => imports::kernel32::CloseHandle as *const () as usize,
+            "GetFileSize" => imports::kernel32::GetFileSize as *const () as usize,
+            "GetFileSizeEx" => imports::kernel32::GetFileSizeEx as *const () as usize,
+            "GetFileType" => imports::kernel32::GetFileType as *const () as usize,
+            "SetFilePointer" => imports::kernel32::SetFilePointer as *const () as usize,
+            "SetFilePointerEx" => imports::kernel32::SetFilePointerEx as *const () as usize,
+            "SetEndOfFile" => imports::kernel32::SetEndOfFile as *const () as usize,
+            "DeleteFileW" => imports::kernel32::DeleteFileW as *const () as usize,
+            "GetFileAttributesW" => imports::kernel32::GetFileAttributesW as *const () as usize,
+            "SetFileAttributesW" => imports::kernel32::SetFileAttributesW as *const () as usize,
+            "GetFullPathNameW" => imports::kernel32::GetFullPathNameW as *const () as usize,
+            "GetFullPathNameA" => imports::kernel32::GetFullPathNameA as *const () as usize,
+            "CreateFileMappingW" => imports::kernel32::CreateFileMappingW as *const () as usize,
+            "MapViewOfFile" => imports::kernel32::MapViewOfFile as *const () as usize,
+            "MapViewOfFileEx" => imports::kernel32::MapViewOfFileEx as *const () as usize,
+            "UnmapViewOfFile" => imports::kernel32::UnmapViewOfFile as *const () as usize,
+            "FlushViewOfFile" => imports::kernel32::FlushViewOfFile as *const () as usize,
+            "DeviceIoControl" => imports::kernel32::DeviceIoControl as *const () as usize,
 
             // sync
-            "InitializeCriticalSection" => imports::kernel32::InitializeCriticalSection as usize,
-            "InitializeCriticalSectionAndSpinCount" => {
-                imports::kernel32::InitializeCriticalSectionAndSpinCount as usize
+            "InitializeCriticalSection" => {
+                imports::kernel32::InitializeCriticalSection as *const () as usize
             }
-            "DeleteCriticalSection" => imports::kernel32::DeleteCriticalSection as usize,
-            "EnterCriticalSection" => imports::kernel32::EnterCriticalSection as usize,
-            "LeaveCriticalSection" => imports::kernel32::LeaveCriticalSection as usize,
-            "Sleep" => imports::kernel32::Sleep as usize,
+            "InitializeCriticalSectionAndSpinCount" => {
+                imports::kernel32::InitializeCriticalSectionAndSpinCount as *const () as usize
+            }
+            "DeleteCriticalSection" => {
+                imports::kernel32::DeleteCriticalSection as *const () as usize
+            }
+            "EnterCriticalSection" => imports::kernel32::EnterCriticalSection as *const () as usize,
+            "LeaveCriticalSection" => imports::kernel32::LeaveCriticalSection as *const () as usize,
+            "Sleep" => imports::kernel32::Sleep as *const () as usize,
 
             // TLS
-            "TlsAlloc" => imports::kernel32::TlsAlloc as usize,
-            "TlsFree" => imports::kernel32::TlsFree as usize,
-            "TlsGetValue" => imports::kernel32::TlsGetValue as usize,
-            "TlsSetValue" => imports::kernel32::TlsSetValue as usize,
+            "TlsAlloc" => imports::kernel32::TlsAlloc as *const () as usize,
+            "TlsFree" => imports::kernel32::TlsFree as *const () as usize,
+            "TlsGetValue" => imports::kernel32::TlsGetValue as *const () as usize,
+            "TlsSetValue" => imports::kernel32::TlsSetValue as *const () as usize,
 
             // misc
-            "GetLastError" => imports::kernel32::GetLastError as usize,
-            "SetLastError" => imports::kernel32::SetLastError as usize,
-            "GetCurrentProcessId" => imports::kernel32::GetCurrentProcessId as usize,
-            "GetCurrentThreadId" => imports::kernel32::GetCurrentThreadId as usize,
-            "GetCurrentProcess" => imports::kernel32::GetCurrentProcess as usize,
-            "GetTickCount" => imports::kernel32::GetTickCount as usize,
-            "QueryPerformanceCounter" => imports::kernel32::QueryPerformanceCounter as usize,
-            "GetSystemTimeAsFileTime" => imports::kernel32::GetSystemTimeAsFileTime as usize,
-            "GetSystemInfo" => imports::kernel32::GetSystemInfo as usize,
-            "OutputDebugStringA" => imports::kernel32::OutputDebugStringA as usize,
-            "DisableThreadLibraryCalls" => imports::kernel32::DisableThreadLibraryCalls as usize,
-            "FreeLibrary" => imports::kernel32::FreeLibrary as usize,
-            "LoadLibraryExW" => imports::kernel32::LoadLibraryExW as usize,
-            "GetProcAddress" => imports::kernel32::GetProcAddress as usize,
-            "GetModuleFileNameA" => imports::kernel32::GetModuleFileNameA as usize,
-            "GetEnvironmentVariableA" => imports::kernel32::GetEnvironmentVariableA as usize,
-            "ExpandEnvironmentStringsW" => imports::kernel32::ExpandEnvironmentStringsW as usize,
-            "MultiByteToWideChar" => imports::kernel32::MultiByteToWideChar as usize,
-            "WideCharToMultiByte" => imports::kernel32::WideCharToMultiByte as usize,
-            "LCMapStringW" => imports::kernel32::LCMapStringW as usize,
-            "lstrcmpiA" => imports::kernel32::lstrcmpiA as usize,
-            "TerminateProcess" => imports::kernel32::TerminateProcess as usize,
-            "UnhandledExceptionFilter" => imports::kernel32::UnhandledExceptionFilter as usize,
-            "SetUnhandledExceptionFilter" => {
-                imports::kernel32::SetUnhandledExceptionFilter as usize
+            "GetLastError" => imports::kernel32::GetLastError as *const () as usize,
+            "SetLastError" => imports::kernel32::SetLastError as *const () as usize,
+            "GetCurrentProcessId" => imports::kernel32::GetCurrentProcessId as *const () as usize,
+            "GetCurrentThreadId" => imports::kernel32::GetCurrentThreadId as *const () as usize,
+            "GetCurrentProcess" => imports::kernel32::GetCurrentProcess as *const () as usize,
+            "GetTickCount" => imports::kernel32::GetTickCount as *const () as usize,
+            "QueryPerformanceCounter" => {
+                imports::kernel32::QueryPerformanceCounter as *const () as usize
             }
-            "IsDebuggerPresent" => imports::kernel32::IsDebuggerPresent as usize,
-            "IsProcessorFeaturePresent" => imports::kernel32::IsProcessorFeaturePresent as usize,
+            "GetSystemTimeAsFileTime" => {
+                imports::kernel32::GetSystemTimeAsFileTime as *const () as usize
+            }
+            "GetSystemInfo" => imports::kernel32::GetSystemInfo as *const () as usize,
+            "OutputDebugStringA" => imports::kernel32::OutputDebugStringA as *const () as usize,
+            "DisableThreadLibraryCalls" => {
+                imports::kernel32::DisableThreadLibraryCalls as *const () as usize
+            }
+            "FreeLibrary" => imports::kernel32::FreeLibrary as *const () as usize,
+            "LoadLibraryExW" => imports::kernel32::LoadLibraryExW as *const () as usize,
+            "GetProcAddress" => imports::kernel32::GetProcAddress as *const () as usize,
+            "GetModuleFileNameA" => imports::kernel32::GetModuleFileNameA as *const () as usize,
+            "GetEnvironmentVariableA" => {
+                imports::kernel32::GetEnvironmentVariableA as *const () as usize
+            }
+            "ExpandEnvironmentStringsW" => {
+                imports::kernel32::ExpandEnvironmentStringsW as *const () as usize
+            }
+            "MultiByteToWideChar" => imports::kernel32::MultiByteToWideChar as *const () as usize,
+            "WideCharToMultiByte" => imports::kernel32::WideCharToMultiByte as *const () as usize,
+            "LCMapStringW" => imports::kernel32::LCMapStringW as *const () as usize,
+            "lstrcmpiA" => imports::kernel32::lstrcmpiA as *const () as usize,
+            "TerminateProcess" => imports::kernel32::TerminateProcess as *const () as usize,
+            "UnhandledExceptionFilter" => {
+                imports::kernel32::UnhandledExceptionFilter as *const () as usize
+            }
+            "SetUnhandledExceptionFilter" => {
+                imports::kernel32::SetUnhandledExceptionFilter as *const () as usize
+            }
+            "IsDebuggerPresent" => imports::kernel32::IsDebuggerPresent as *const () as usize,
+            "IsProcessorFeaturePresent" => {
+                imports::kernel32::IsProcessorFeaturePresent as *const () as usize
+            }
             _ => 0xDEADBEEF,
         }
     }
@@ -1578,37 +1596,39 @@ mod linux_loader {
     fn resolve_advapi32(name: &str) -> usize {
         match name {
             // registry
-            "RegOpenKeyExA" => imports::advapi32::RegOpenKeyExA as usize,
-            "RegOpenKeyExW" => imports::advapi32::RegOpenKeyExW as usize,
-            "RegQueryValueExA" => imports::advapi32::RegQueryValueExA as usize,
-            "RegQueryValueExW" => imports::advapi32::RegQueryValueExW as usize,
-            "RegEnumKeyExA" => imports::advapi32::RegEnumKeyExA as usize,
-            "RegCloseKey" => imports::advapi32::RegCloseKey as usize,
+            "RegOpenKeyExA" => imports::advapi32::RegOpenKeyExA as *const () as usize,
+            "RegOpenKeyExW" => imports::advapi32::RegOpenKeyExW as *const () as usize,
+            "RegQueryValueExA" => imports::advapi32::RegQueryValueExA as *const () as usize,
+            "RegQueryValueExW" => imports::advapi32::RegQueryValueExW as *const () as usize,
+            "RegEnumKeyExA" => imports::advapi32::RegEnumKeyExA as *const () as usize,
+            "RegCloseKey" => imports::advapi32::RegCloseKey as *const () as usize,
 
             // crypto
-            "CryptAcquireContextW" => imports::advapi32::CryptAcquireContextW as usize,
-            "CryptReleaseContext" => imports::advapi32::CryptReleaseContext as usize,
-            "CryptCreateHash" => imports::advapi32::CryptCreateHash as usize,
-            "CryptDestroyHash" => imports::advapi32::CryptDestroyHash as usize,
-            "CryptHashData" => imports::advapi32::CryptHashData as usize,
-            "CryptGetHashParam" => imports::advapi32::CryptGetHashParam as usize,
+            "CryptAcquireContextW" => imports::advapi32::CryptAcquireContextW as *const () as usize,
+            "CryptReleaseContext" => imports::advapi32::CryptReleaseContext as *const () as usize,
+            "CryptCreateHash" => imports::advapi32::CryptCreateHash as *const () as usize,
+            "CryptDestroyHash" => imports::advapi32::CryptDestroyHash as *const () as usize,
+            "CryptHashData" => imports::advapi32::CryptHashData as *const () as usize,
+            "CryptGetHashParam" => imports::advapi32::CryptGetHashParam as *const () as usize,
             _ => 0xDEADBEEF,
         }
     }
 
     fn resolve_ntdll(name: &str) -> usize {
         match name {
-            "RtlCaptureContext" => imports::ntdll::RtlCaptureContext as usize,
-            "RtlLookupFunctionEntry" => imports::ntdll::RtlLookupFunctionEntry as usize,
-            "RtlVirtualUnwind" => imports::ntdll::RtlVirtualUnwind as usize,
-            "RtlUnwindEx" => imports::ntdll::RtlUnwindEx as usize,
+            "RtlCaptureContext" => imports::ntdll::RtlCaptureContext as *const () as usize,
+            "RtlLookupFunctionEntry" => {
+                imports::ntdll::RtlLookupFunctionEntry as *const () as usize
+            }
+            "RtlVirtualUnwind" => imports::ntdll::RtlVirtualUnwind as *const () as usize,
+            "RtlUnwindEx" => imports::ntdll::RtlUnwindEx as *const () as usize,
             _ => 0xDEADBEEF,
         }
     }
 
     fn resolve_rpcrt4(name: &str) -> usize {
         match name {
-            "UuidCreate" => imports::rpcrt4::UuidCreate as usize,
+            "UuidCreate" => imports::rpcrt4::UuidCreate as *const () as usize,
             _ => 0xDEADBEEF,
         }
     }

@@ -323,11 +323,10 @@ import_fn! {
         );
         if !lpMem.is_null() {
             let mut t = heap_table().lock().unwrap();
-            if let Some(v) = t.get_mut(&(hHeap as u32)) {
-                if let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
+            if let Some(v) = t.get_mut(&(hHeap as u32))
+                && let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
                     v.swap_remove(pos);
                 }
-            }
         }
         let new_ptr = if lpMem.is_null() {
             libc::malloc(dwBytes)
@@ -352,11 +351,10 @@ import_fn! {
         trace_call!("kernel32!HeapFree", "ptr={:p}", lpMem);
         if !lpMem.is_null() {
             let mut t = heap_table().lock().unwrap();
-            if let Some(v) = t.get_mut(&(hHeap as u32)) {
-                if let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
+            if let Some(v) = t.get_mut(&(hHeap as u32))
+                && let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
                     v.swap_remove(pos);
                 }
-            }
             libc::free(lpMem);
         }
         1
