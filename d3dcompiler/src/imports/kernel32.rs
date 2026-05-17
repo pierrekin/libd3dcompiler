@@ -2,11 +2,21 @@ use super::*;
 
 use std::collections::HashMap;
 use std::ffi::CStr;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 
 static EXCEPTION_FILTER: AtomicU64 = AtomicU64::new(0);
-static HEAP_HANDLE: AtomicU32 = AtomicU32::new(0x12345678);
+const PROCESS_HEAP: u32 = 0x12345678;
+static HEAP_NEXT: AtomicU32 = AtomicU32::new(PROCESS_HEAP);
+static HEAP_ALLOCS: OnceLock<Mutex<HashMap<u32, Vec<usize>>>> = OnceLock::new();
+fn heap_table() -> &'static Mutex<HashMap<u32, Vec<usize>>> {
+    HEAP_ALLOCS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+static VIRT_REGIONS: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+fn virt_table() -> &'static Mutex<HashMap<usize, usize>> {
+    VIRT_REGIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 static HANDLE_MAP: OnceLock<RwLock<HashMap<usize, i32>>> = OnceLock::new();
 static NEXT_HANDLE: AtomicU32 = AtomicU32::new(0x1000);
 static MMAP_MAP: OnceLock<RwLock<HashMap<usize, (usize, usize)>>> = OnceLock::new();
@@ -212,6 +222,10 @@ import_fn! {
         if ptr == libc::MAP_FAILED {
             std::ptr::null_mut()
         } else {
+            virt_table()
+                .lock()
+                .unwrap()
+                .insert(ptr as usize, dwSize);
             ptr
         }
     }
@@ -227,7 +241,22 @@ import_fn! {
             lpAddress,
             dwSize
         );
-        if dwSize == 0 || libc::munmap(lpAddress, dwSize) == 0 {
+        if lpAddress.is_null() {
+            return 0;
+        }
+        let release_size = if dwSize == 0 {
+            virt_table()
+                .lock()
+                .unwrap()
+                .remove(&(lpAddress as usize))
+                .unwrap_or(0)
+        } else {
+            dwSize
+        };
+        if release_size == 0 {
+            return 1;
+        }
+        if libc::munmap(lpAddress, release_size) == 0 {
             1
         } else {
             0
@@ -236,7 +265,7 @@ import_fn! {
 
     fn GetProcessHeap() -> *mut c_void {
         trace_call!("kernel32!GetProcessHeap");
-        HEAP_HANDLE.load(Ordering::Relaxed) as *mut c_void
+        PROCESS_HEAP as *mut c_void
     }
 
     fn HeapCreate(
@@ -245,31 +274,97 @@ import_fn! {
         _dwMaximumSize: usize,
     ) -> *mut c_void {
         trace_call!("kernel32!HeapCreate");
-        HEAP_HANDLE.fetch_add(1, Ordering::Relaxed) as *mut c_void
+        HEAP_NEXT.fetch_add(1, Ordering::Relaxed) as *mut c_void
     }
 
-    fn HeapDestroy(_hHeap: *mut c_void) -> i32 {
-        trace_call!("kernel32!HeapDestroy");
+    fn HeapDestroy(hHeap: *mut c_void) -> i32 {
+        trace_call!("kernel32!HeapDestroy", "hHeap={:p}", hHeap);
+        let removed = heap_table().lock().unwrap().remove(&(hHeap as u32));
+        if let Some(ptrs) = removed {
+            for p in ptrs {
+                libc::free(p as *mut c_void);
+            }
+        }
         1
     }
 
     fn HeapAlloc(
-        _hHeap: *mut c_void,
+        hHeap: *mut c_void,
         dwFlags: u32,
         dwBytes: usize,
     ) -> *mut c_void {
         trace_call!("kernel32!HeapAlloc", "size={}", dwBytes);
         let ptr = libc::malloc(dwBytes);
-        if dwFlags & 0x08 != 0 && !ptr.is_null() {
-            libc::memset(ptr, 0, dwBytes);
+        if !ptr.is_null() {
+            if dwFlags & 0x08 != 0 {
+                libc::memset(ptr, 0, dwBytes);
+            }
+            heap_table()
+                .lock()
+                .unwrap()
+                .entry(hHeap as u32)
+                .or_default()
+                .push(ptr as usize);
         }
         ptr
     }
 
-    fn HeapFree(_hHeap: *mut c_void, _dwFlags: u32, lpMem: *mut c_void) -> i32 {
+    fn HeapReAlloc(
+        hHeap: *mut c_void,
+        dwFlags: u32,
+        lpMem: *mut c_void,
+        dwBytes: usize,
+    ) -> *mut c_void {
+        trace_call!(
+            "kernel32!HeapReAlloc",
+            "ptr={:p}, size={}",
+            lpMem,
+            dwBytes
+        );
+        if !lpMem.is_null() {
+            let mut t = heap_table().lock().unwrap();
+            if let Some(v) = t.get_mut(&(hHeap as u32)) {
+                if let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
+                    v.swap_remove(pos);
+                }
+            }
+        }
+        let new_ptr = if lpMem.is_null() {
+            libc::malloc(dwBytes)
+        } else {
+            libc::realloc(lpMem, dwBytes)
+        };
+        if !new_ptr.is_null() {
+            if dwFlags & 0x08 != 0 {
+                libc::memset(new_ptr, 0, dwBytes);
+            }
+            heap_table()
+                .lock()
+                .unwrap()
+                .entry(hHeap as u32)
+                .or_default()
+                .push(new_ptr as usize);
+        }
+        new_ptr
+    }
+
+    fn HeapFree(hHeap: *mut c_void, _dwFlags: u32, lpMem: *mut c_void) -> i32 {
         trace_call!("kernel32!HeapFree", "ptr={:p}", lpMem);
-        libc::free(lpMem);
+        if !lpMem.is_null() {
+            let mut t = heap_table().lock().unwrap();
+            if let Some(v) = t.get_mut(&(hHeap as u32)) {
+                if let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
+                    v.swap_remove(pos);
+                }
+            }
+            libc::free(lpMem);
+        }
         1
+    }
+
+    fn HeapSize(_hHeap: *mut c_void, _dwFlags: u32, _lpMem: *const c_void) -> usize {
+        trace_call!("kernel32!HeapSize");
+        usize::MAX
     }
 
     fn LocalAlloc(uFlags: u32, uBytes: usize) -> *mut c_void {
