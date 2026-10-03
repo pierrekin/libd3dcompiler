@@ -697,3 +697,76 @@ import_fn! {
         base
     }
 }
+
+#[repr(C)]
+struct UnwindContext {
+    _private: [u8; 0],
+}
+
+unsafe extern "C" {
+    fn _Unwind_Backtrace(
+        trace: unsafe extern "C" fn(*mut UnwindContext, *mut c_void) -> i32,
+        argument: *mut c_void,
+    ) -> i32;
+    fn _Unwind_GetIP(context: *mut UnwindContext) -> usize;
+    fn _Unwind_GetCFA(context: *mut UnwindContext) -> usize;
+    fn _Unwind_GetGR(context: *mut UnwindContext, index: i32) -> usize;
+}
+
+/// The return addresses of the nearest DLL frames on this thread's stack, nearest first. This
+/// library's frames are unwound with their DWARF tables up to the first DLL frame, and the DLL's
+/// with their own.
+pub(crate) fn dll_backtrace<const N: usize>() -> [usize; N] {
+    // the first DLL frame: its rip, rsp and rbp
+    unsafe extern "C" fn first_dll_frame(context: *mut UnwindContext, found: *mut c_void) -> i32 {
+        let found = unsafe { &mut *(found as *mut Option<(usize, usize, usize)>) };
+        let ip = unsafe { _Unwind_GetIP(context) };
+        if crate::module::find_by_address(ip).is_some() {
+            *found = Some(unsafe { (ip, _Unwind_GetCFA(context), _Unwind_GetGR(context, 6)) });
+            return 1;
+        }
+        0
+    }
+    let mut frames = [0; N];
+    let mut found: Option<(usize, usize, usize)> = None;
+    unsafe { _Unwind_Backtrace(first_dll_frame, &mut found as *mut _ as *mut c_void) };
+    let Some((rip, rsp, rbp)) = found else {
+        return frames;
+    };
+    let mut context = CONTEXT {
+        data: [0; CONTEXT_SIZE],
+    };
+    *context.rip() = rip as u64;
+    *context.rsp() = rsp as u64;
+    *context.reg(5) = rbp as u64;
+    for slot in frames.iter_mut() {
+        let pc = *context.rip() as usize;
+        if crate::module::find_by_address(pc).is_none() {
+            break;
+        }
+        *slot = pc;
+        let mut next = context.clone();
+        match unsafe { lookup_function_entry(pc) } {
+            Some((function, base)) => unsafe {
+                let (mut data, mut frame) = (std::ptr::null_mut(), 0);
+                virtual_unwind(
+                    0,
+                    base,
+                    pc,
+                    function,
+                    &mut next,
+                    &mut data,
+                    &mut frame,
+                    std::ptr::null_mut(),
+                );
+            },
+            None => unsafe {
+                let sp = *next.rsp() as usize;
+                *next.rip() = *(sp as *const u64);
+                *next.rsp() += 8;
+            },
+        }
+        context = next;
+    }
+    frames
+}
