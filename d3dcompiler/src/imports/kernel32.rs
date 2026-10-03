@@ -195,19 +195,27 @@ import_fn! {
 
     // ============ KERNEL32 - memory ============
 
+    // Windows reserves address space and commits pages inside it as separate steps, and expects a
+    // commit to land at the address asked for. A reservation is mapped with no access, a commit
+    // inside one turns access on in place, a decommit discards the pages and turns access off, and a
+    // release unmaps the whole reservation. MEM_COMMIT 0x1000, MEM_RESERVE 0x2000, MEM_DECOMMIT
+    // 0x4000, MEM_RELEASE 0x8000.
     fn VirtualAlloc(
         lpAddress: *mut c_void,
         dwSize: usize,
-        _flAllocationType: u32,
+        flAllocationType: u32,
         flProtect: u32,
     ) -> *mut c_void {
         trace_call!(
             "kernel32!VirtualAlloc",
-            "size={}, prot=0x{:x}",
+            "addr={:p}, size={}, type=0x{:x}, prot=0x{:x}",
+            lpAddress,
             dwSize,
+            flAllocationType,
             flProtect
         );
         let prot = match flProtect {
+            0x01 => libc::PROT_NONE,
             0x04 => libc::PROT_READ | libc::PROT_WRITE,
             0x02 => libc::PROT_READ,
             0x10 => libc::PROT_READ | libc::PROT_EXEC,
@@ -215,58 +223,95 @@ import_fn! {
             0x40 => libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
             _ => libc::PROT_READ | libc::PROT_WRITE,
         };
+        let page = 4096usize;
 
-        let ptr = libc::mmap(
-            lpAddress,
-            dwSize,
-            prot,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-            -1,
-            0,
-        );
-
-        if ptr == libc::MAP_FAILED {
-            std::ptr::null_mut()
-        } else {
-            virt_table()
+        // committing pages of an existing reservation
+        if !lpAddress.is_null() && flAllocationType & 0x2000 == 0 {
+            let start = lpAddress as usize & !(page - 1);
+            let end = (lpAddress as usize + dwSize + page - 1) & !(page - 1);
+            let inside = virt_table()
                 .lock()
                 .unwrap()
-                .insert(ptr as usize, dwSize);
-            ptr
+                .iter()
+                .any(|(&base, &size)| start >= base && end <= base + size);
+            if !inside || libc::mprotect(start as *mut c_void, end - start, prot) != 0 {
+                trace_call!("kernel32!VirtualAlloc failed", "commit outside a reservation: {:p} size {}", lpAddress, dwSize);
+                return std::ptr::null_mut();
+            }
+            return start as *mut c_void;
         }
+
+        // a new reservation, committed or not; Windows places it on a 64 KiB boundary, which an
+        // address the caller asks for already is
+        let reserve_only = flAllocationType & 0x1000 == 0;
+        let size = (dwSize + page - 1) & !(page - 1);
+        let flags = libc::MAP_PRIVATE
+            | libc::MAP_ANONYMOUS
+            | if reserve_only { libc::MAP_NORESERVE } else { 0 }
+            | if lpAddress.is_null() { 0 } else { libc::MAP_FIXED_NOREPLACE };
+        let prot = if reserve_only { libc::PROT_NONE } else { prot };
+        let ptr = if lpAddress.is_null() {
+            // map 64 KiB more than asked, then trim to a 64 KiB boundary
+            let granularity = 0x10000usize;
+            let raw = libc::mmap(std::ptr::null_mut(), size + granularity, prot, flags, -1, 0);
+            if raw == libc::MAP_FAILED {
+                return std::ptr::null_mut();
+            }
+            let aligned = (raw as usize + granularity - 1) & !(granularity - 1);
+            let head = aligned - raw as usize;
+            if head > 0 {
+                libc::munmap(raw, head);
+            }
+            let tail = granularity - head;
+            if tail > 0 {
+                libc::munmap((aligned + size) as *mut c_void, tail);
+            }
+            aligned as *mut c_void
+        } else {
+            libc::mmap(lpAddress, size, prot, flags, -1, 0)
+        };
+        if ptr == libc::MAP_FAILED {
+            return std::ptr::null_mut();
+        }
+        virt_table().lock().unwrap().insert(ptr as usize, size);
+        ptr
     }
 
     fn VirtualFree(
         lpAddress: *mut c_void,
         dwSize: usize,
-        _dwFreeType: u32,
+        dwFreeType: u32,
     ) -> i32 {
         trace_call!(
             "kernel32!VirtualFree",
-            "addr={:p}, size={}",
+            "addr={:p}, size={}, type=0x{:x}",
             lpAddress,
-            dwSize
+            dwSize,
+            dwFreeType
         );
         if lpAddress.is_null() {
             return 0;
         }
-        let release_size = if dwSize == 0 {
-            virt_table()
-                .lock()
-                .unwrap()
-                .remove(&(lpAddress as usize))
-                .unwrap_or(0)
-        } else {
-            dwSize
+        let page = 4096usize;
+        if dwFreeType & 0x4000 != 0 {
+            // decommit: the range, or the whole reservation when the size is 0
+            let start = lpAddress as usize & !(page - 1);
+            let size = if dwSize == 0 {
+                match virt_table().lock().unwrap().get(&start) {
+                    Some(&size) => size,
+                    None => return 0,
+                }
+            } else {
+                (lpAddress as usize + dwSize + page - 1 - start) & !(page - 1)
+            };
+            libc::madvise(start as *mut c_void, size, libc::MADV_DONTNEED);
+            return (libc::mprotect(start as *mut c_void, size, libc::PROT_NONE) == 0) as i32;
+        }
+        // release: always the whole reservation, from its base
+        let Some(size) = virt_table().lock().unwrap().remove(&(lpAddress as usize)) else {
+            return 0;
         };
-        if release_size == 0 {
-            return 1;
-        }
-        if libc::munmap(lpAddress, release_size) == 0 {
-            1
-        } else {
-            0
-        }
+        (libc::munmap(lpAddress, size) == 0) as i32
     }
 
     fn GetProcessHeap() -> *mut c_void {
