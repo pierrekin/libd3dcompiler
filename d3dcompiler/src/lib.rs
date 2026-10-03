@@ -871,6 +871,8 @@ mod linux_loader {
     //   0x20: FiberData / Version
     //   0x28: ArbitraryUserPointer
     //   0x30: Self (pointer to TEB itself - NT_TIB.Self)
+    //   0x58: ThreadLocalStoragePointer (array of each module's implicit TLS block)
+    //   0x60: ProcessEnvironmentBlock
     #[repr(C)]
     struct ThreadInformationBlock {
         exception_list: usize,         // 0x00
@@ -883,6 +885,9 @@ mod linux_loader {
         environment_pointer: usize,    // 0x38
         process_id: usize,             // 0x40
         thread_id: usize,              // 0x48
+        active_rpc_handle: usize,      // 0x50
+        tls_pointer: usize,            // 0x58
+        peb: usize,                    // 0x60
     }
 
     // Thread-local TIB - each thread gets its own
@@ -899,13 +904,40 @@ mod linux_loader {
                 environment_pointer: 0,
                 process_id: 0,
                 thread_id: 0,
+                active_rpc_handle: 0,
+                tls_pointer: 0,
+                peb: 0,
             })
         };
         static TIB_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
+    // The DLL's implicit TLS template (__declspec(thread) variables, and the epoch MSVC's guarded
+    // statics compare against): its address in the mapped image, its initialised size and the zeros
+    // after it. Each thread gets its own copy, in slot 0 of the TLS array at TEB+0x58, since this is
+    // the only module with TLS.
+    static TLS_TEMPLATE: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+
+    unsafe fn setup_thread_tls() {
+        let Some(&(start, len, zero_fill)) = TLS_TEMPLATE.get() else {
+            return;
+        };
+        TIB.with(|tib| {
+            let tib_ptr = tib.get();
+            if (*tib_ptr).tls_pointer != 0 {
+                return;
+            }
+            let block = libc::calloc(1, (len + zero_fill).max(1)) as *mut u8;
+            std::ptr::copy_nonoverlapping(start as *const u8, block, len);
+            let slots = libc::calloc(64, std::mem::size_of::<usize>()) as *mut usize;
+            *slots = block as usize;
+            (*tib_ptr).tls_pointer = slots as usize;
+        });
+    }
+
     // Set up GS register for Windows TIB access (once per thread)
     pub unsafe fn setup_tib() {
+        setup_thread_tls();
         TIB_INITIALIZED.with(|initialized| {
             if initialized.get() {
                 return;
@@ -1243,6 +1275,32 @@ mod linux_loader {
         // Set up TIB before calling into DLL
         unsafe {
             setup_tib();
+        }
+
+        // Implicit TLS: this module's index is 0, and its template is copied for every thread
+        if let Some(dir) = obj_file
+            .data_directories()
+            .get(object::pe::IMAGE_DIRECTORY_ENTRY_TLS)
+            .filter(|d| d.virtual_address.get(LE) != 0)
+        {
+            unsafe {
+                // the directory's addresses are absolute and were relocated with the image
+                let tls = map_base.add(dir.virtual_address.get(LE) as usize) as *const u64;
+                let (start, end, index, callbacks) = (*tls, *tls.add(1), *tls.add(2), *tls.add(3));
+                let zero_fill = *(tls.add(4) as *const u32) as usize;
+                *(index as *mut u32) = 0;
+                let _ = TLS_TEMPLATE.set((start as usize, (end - start) as usize, zero_fill));
+                setup_thread_tls();
+                if callbacks != 0 {
+                    type TlsCallback = unsafe extern "win64" fn(*mut c_void, u32, *mut c_void);
+                    let mut cb = callbacks as *const usize;
+                    while *cb != 0 {
+                        let f = std::mem::transmute::<usize, TlsCallback>(*cb);
+                        f(map_base as *mut c_void, 1, std::ptr::null_mut());
+                        cb = cb.add(1);
+                    }
+                }
+            }
         }
 
         // Call DllMain via PE entry point (DLL_PROCESS_ATTACH = 1)
