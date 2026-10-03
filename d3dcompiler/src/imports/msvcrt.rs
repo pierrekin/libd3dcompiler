@@ -1207,7 +1207,7 @@ import_fn! {
     }
 
     fn __stdio_common_vsprintf(
-        _options: u64,
+        options: u64,
         buffer: *mut i8,
         count: usize,
         format: *const i8,
@@ -1215,11 +1215,11 @@ import_fn! {
         arglist: *mut c_void,
     ) -> i32 {
         trace_call!("ucrt!__stdio_common_vsprintf");
-        super::printf::vsnprintf_core(buffer, count, format, arglist as *const u64)
+        common_vsprintf(options, buffer, count, format, arglist)
     }
 
     fn __stdio_common_vsprintf_s(
-        _options: u64,
+        options: u64,
         buffer: *mut i8,
         count: usize,
         format: *const i8,
@@ -1227,11 +1227,11 @@ import_fn! {
         arglist: *mut c_void,
     ) -> i32 {
         trace_call!("ucrt!__stdio_common_vsprintf_s");
-        super::printf::vsnprintf_core(buffer, count, format, arglist as *const u64)
+        common_vsprintf(options, buffer, count, format, arglist)
     }
 
     fn __stdio_common_vsnprintf_s(
-        _options: u64,
+        options: u64,
         buffer: *mut i8,
         count: usize,
         max_count: usize,
@@ -1241,7 +1241,7 @@ import_fn! {
     ) -> i32 {
         trace_call!("ucrt!__stdio_common_vsnprintf_s");
         let limit = if max_count == usize::MAX { count } else { count.min(max_count + 1) };
-        super::printf::vsnprintf_core(buffer, limit, format, arglist as *const u64)
+        common_vsprintf(options, buffer, limit, format, arglist)
     }
 
     fn __stdio_common_vswprintf(
@@ -1292,6 +1292,55 @@ import_fn! {
         trace_call!("ucrt!__stdio_common_vsscanf");
         panic!("ucrt!__stdio_common_vsscanf not implemented");
     }
+}
+
+// Formats into the buffer as the Universal CRT does. With no buffer, the caller is asking how long
+// the text is. Text that fits is written with its terminator and its length returned. Text that
+// fills the buffer exactly is written without a terminator, and its length returned, under
+// _CRT_INTERNAL_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION (option 0x1), the old _vsnprintf rule.
+// Longer text is cut to fit: _CRT_INTERNAL_PRINTF_STANDARD_SNPRINTF_BEHAVIOR (0x2) terminates it
+// and returns the full length, as C's snprintf does; otherwise it fills the buffer and returns -1.
+unsafe fn common_vsprintf(
+    options: u64,
+    buffer: *mut i8,
+    count: usize,
+    format: *const i8,
+    arglist: *mut c_void,
+) -> i32 {
+    let mut scratch = vec![0i8; 1024];
+    let len = loop {
+        let n = super::printf::vsnprintf_core(
+            scratch.as_mut_ptr(),
+            scratch.len(),
+            format,
+            arglist as *const u64,
+        );
+        if n >= 0 && (n as usize) < scratch.len() - 1 {
+            break n as usize;
+        }
+        if scratch.len() >= 1 << 24 {
+            return -1;
+        }
+        scratch.resize(scratch.len() * 4, 0);
+    };
+    if buffer.is_null() || count == 0 {
+        return len as i32;
+    }
+    if len < count {
+        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, len + 1);
+        return len as i32;
+    }
+    if len == count && options & 1 != 0 {
+        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, len);
+        return len as i32;
+    }
+    if options & 2 != 0 {
+        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, count - 1);
+        *buffer.add(count - 1) = 0;
+        return len as i32;
+    }
+    std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, count);
+    -1
 }
 
 // ============ Universal CRT - DLL entry ============
