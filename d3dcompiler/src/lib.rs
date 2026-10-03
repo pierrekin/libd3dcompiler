@@ -1591,6 +1591,14 @@ mod linux_loader {
             "ReadFile" => imports::kernel32::ReadFile as *const () as usize,
             "WriteFile" => imports::kernel32::WriteFile as *const () as usize,
             "CloseHandle" => imports::kernel32::CloseHandle as *const () as usize,
+            "CreateEventW" => imports::kernel32::CreateEventW as *const () as usize,
+            "SetEvent" => imports::kernel32::SetEvent as *const () as usize,
+            "ResetEvent" => imports::kernel32::ResetEvent as *const () as usize,
+            "WaitForSingleObjectEx" => {
+                imports::kernel32::WaitForSingleObjectEx as *const () as usize
+            }
+            "GetModuleHandleW" => imports::kernel32::GetModuleHandleW as *const () as usize,
+            "InitializeSListHead" => imports::kernel32::InitializeSListHead as *const () as usize,
             "GetFileSize" => imports::kernel32::GetFileSize as *const () as usize,
             "GetFileSizeEx" => imports::kernel32::GetFileSizeEx as *const () as usize,
             "GetFileType" => imports::kernel32::GetFileType as *const () as usize,

@@ -555,6 +555,9 @@ import_fn! {
     fn CloseHandle(hObject: *mut c_void) -> i32 {
         trace_call!("kernel32!CloseHandle", "handle={:p}", hObject);
         let handle = hObject as usize;
+        if get_events().lock().unwrap().remove(&handle).is_some() {
+            return 1;
+        }
         if let Some(fd) = free_handle(handle) {
             libc::close(fd);
             1
@@ -1082,12 +1085,23 @@ import_fn! {
         panic!("kernel32!LoadLibraryExW not implemented");
     }
 
+    // Resolves a name in a system DLL that GetModuleHandleW handed out, through the same shims its
+    // imports use. A function there is no shim for is reported missing, which the DLL can handle
     fn GetProcAddress(
-        _hModule: *mut c_void,
-        _lpProcName: *const i8,
+        hModule: *mut c_void,
+        lpProcName: *const i8,
     ) -> *mut c_void {
-        trace_call!("kernel32!GetProcAddress");
-        panic!("kernel32!GetProcAddress not implemented");
+        // a value below 0x10000 is an ordinal, not a name
+        if (lpProcName as usize) < 0x10000 {
+            trace_call!("kernel32!GetProcAddress", "ordinal={}", lpProcName as usize);
+            return std::ptr::null_mut();
+        }
+        let name = CStr::from_ptr(lpProcName).to_string_lossy();
+        trace_call!("kernel32!GetProcAddress", "name={}", name);
+        let Some(dll) = get_modules().lock().unwrap().get(&(hModule as usize)).cloned() else {
+            return std::ptr::null_mut();
+        };
+        crate::linux_loader::resolve_import(&dll, &name).map_or(std::ptr::null_mut(), |a| a as *mut c_void)
     }
 
     fn GetModuleFileNameA(
@@ -1239,5 +1253,137 @@ import_fn! {
     fn lstrcmpiA(lpString1: *const i8, lpString2: *const i8) -> i32 {
         trace_call!("kernel32!lstrcmpiA");
         libc::strcasecmp(lpString1, lpString2)
+    }
+}
+
+// ============ kernel32 - events ============
+// An event is a flag and a condition variable, kept under a handle number from the same counter as
+// file handles
+
+struct Event {
+    signalled: Mutex<bool>,
+    changed: std::sync::Condvar,
+    manual_reset: bool,
+}
+
+// The system DLLs GetModuleHandleW has handed out a handle for, by handle
+static MODULES: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
+
+fn get_modules() -> &'static Mutex<HashMap<usize, String>> {
+    MODULES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static EVENTS: OnceLock<Mutex<HashMap<usize, std::sync::Arc<Event>>>> = OnceLock::new();
+
+fn get_events() -> &'static Mutex<HashMap<usize, std::sync::Arc<Event>>> {
+    EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_event(handle: *mut c_void) -> Option<std::sync::Arc<Event>> {
+    get_events()
+        .lock()
+        .unwrap()
+        .get(&(handle as usize))
+        .cloned()
+}
+
+import_fn! {
+    fn CreateEventW(
+        _lpEventAttributes: *mut c_void,
+        bManualReset: i32,
+        bInitialState: i32,
+        _lpName: *const u16,
+    ) -> *mut c_void {
+        trace_call!("kernel32!CreateEventW");
+        let handle = NEXT_HANDLE.fetch_add(1, Ordering::SeqCst) as usize;
+        let event = Event {
+            signalled: Mutex::new(bInitialState != 0),
+            changed: std::sync::Condvar::new(),
+            manual_reset: bManualReset != 0,
+        };
+        get_events().lock().unwrap().insert(handle, std::sync::Arc::new(event));
+        handle as *mut c_void
+    }
+
+    fn SetEvent(hEvent: *mut c_void) -> i32 {
+        trace_call!("kernel32!SetEvent");
+        match get_event(hEvent) {
+            Some(e) => {
+                *e.signalled.lock().unwrap() = true;
+                e.changed.notify_all();
+                1
+            }
+            None => 0,
+        }
+    }
+
+    fn ResetEvent(hEvent: *mut c_void) -> i32 {
+        trace_call!("kernel32!ResetEvent");
+        match get_event(hEvent) {
+            Some(e) => {
+                *e.signalled.lock().unwrap() = false;
+                1
+            }
+            None => 0,
+        }
+    }
+
+    // WAIT_OBJECT_0 0, WAIT_TIMEOUT 0x102, WAIT_FAILED 0xFFFFFFFF; INFINITE is 0xFFFFFFFF
+    fn WaitForSingleObjectEx(hHandle: *mut c_void, dwMilliseconds: u32, _bAlertable: i32) -> u32 {
+        trace_call!("kernel32!WaitForSingleObjectEx");
+        let Some(e) = get_event(hHandle) else {
+            return 0xFFFFFFFF;
+        };
+        let mut signalled = e.signalled.lock().unwrap();
+        if dwMilliseconds == 0xFFFFFFFF {
+            while !*signalled {
+                signalled = e.changed.wait(signalled).unwrap();
+            }
+        } else {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(dwMilliseconds as u64);
+            while !*signalled {
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return 0x102;
+                }
+                signalled = e.changed.wait_timeout(signalled, deadline - now).unwrap().0;
+            }
+        }
+        if !e.manual_reset {
+            *signalled = false;
+        }
+        0
+    }
+
+    // The only module this process has, as far as the DLL can tell, is the DLL itself
+    fn GetModuleHandleW(lpModuleName: *const u16) -> *mut c_void {
+        trace_call!("kernel32!GetModuleHandleW", "name={}", if lpModuleName.is_null() {
+            "<null>".to_string()
+        } else {
+            String::from_utf8_lossy(&wstr_to_string(lpModuleName)).trim_end_matches('\0').to_string()
+        });
+        if lpModuleName.is_null() {
+            return super::DLL_MAP_BASE.load(Ordering::Relaxed) as *mut c_void;
+        }
+        let name = wstr_to_string(lpModuleName);
+        let name = String::from_utf8_lossy(&name[..name.len() - 1]).to_lowercase();
+        if name.trim_end_matches(".dll") == "d3dcompiler_47" {
+            return super::DLL_MAP_BASE.load(Ordering::Relaxed) as *mut c_void;
+        }
+        // Every system DLL is loaded as far as the DLL can tell; its functions are the shims
+        let dll = if name.ends_with(".dll") { name } else { format!("{name}.dll") };
+        let mut modules = get_modules().lock().unwrap();
+        if let Some((&handle, _)) = modules.iter().find(|(_, n)| **n == dll) {
+            return handle as *mut c_void;
+        }
+        let handle = NEXT_HANDLE.fetch_add(1, Ordering::SeqCst) as usize;
+        modules.insert(handle, dll);
+        handle as *mut c_void
+    }
+
+    // An SLIST_HEADER is 16 bytes, empty when zeroed
+    fn InitializeSListHead(ListHead: *mut c_void) {
+        trace_call!("kernel32!InitializeSListHead");
+        std::ptr::write_bytes(ListHead as *mut u8, 0, 16);
     }
 }
