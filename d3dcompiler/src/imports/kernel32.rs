@@ -1077,12 +1077,25 @@ import_fn! {
     }
 
     fn LoadLibraryExW(
-        _lpLibFileName: *const u16,
+        lpLibFileName: *const u16,
         _hFile: *mut c_void,
         _dwFlags: u32,
     ) -> *mut c_void {
-        trace_call!("kernel32!LoadLibraryExW");
-        panic!("kernel32!LoadLibraryExW not implemented");
+        let name = wide_to_string(lpLibFileName);
+        trace_call!("kernel32!LoadLibraryExW", "name={}", name);
+        module_handle(&name, true)
+    }
+
+    fn LoadLibraryW(lpLibFileName: *const u16) -> *mut c_void {
+        let name = wide_to_string(lpLibFileName);
+        trace_call!("kernel32!LoadLibraryW", "name={}", name);
+        module_handle(&name, true)
+    }
+
+    fn LoadLibraryA(lpLibFileName: *const i8) -> *mut c_void {
+        let name = CStr::from_ptr(lpLibFileName).to_string_lossy().into_owned();
+        trace_call!("kernel32!LoadLibraryA", "name={}", name);
+        module_handle(&name, true)
     }
 
     // Resolves a name in a system DLL that GetModuleHandleW handed out, through the same shims its
@@ -1094,10 +1107,15 @@ import_fn! {
         // a value below 0x10000 is an ordinal, not a name
         if (lpProcName as usize) < 0x10000 {
             trace_call!("kernel32!GetProcAddress", "ordinal={}", lpProcName as usize);
-            return std::ptr::null_mut();
+            return crate::module::find_by_handle(hModule as usize)
+                .and_then(|m| m.export_by_ordinal(lpProcName as u32))
+                .map_or(std::ptr::null_mut(), |a| a as *mut c_void);
         }
         let name = CStr::from_ptr(lpProcName).to_string_lossy();
         trace_call!("kernel32!GetProcAddress", "name={}", name);
+        if let Some(module) = crate::module::find_by_handle(hModule as usize) {
+            return module.export(&name).map_or(std::ptr::null_mut(), |a| a as *mut c_void);
+        }
         let Some(dll) = get_modules().lock().unwrap().get(&(hModule as usize)).cloned() else {
             return std::ptr::null_mut();
         };
@@ -1266,6 +1284,46 @@ struct Event {
     manual_reset: bool,
 }
 
+fn wide_to_string(s: *const u16) -> String {
+    let name = unsafe { wstr_to_string(s) };
+    String::from_utf8_lossy(&name[..name.len() - 1]).into_owned()
+}
+
+// A DLL that is loaded has its base address as its handle, as on Windows; with load, a DLL found
+// beside a loaded one is loaded first. Every system DLL is loaded as far as the DLLs can tell, and
+// its functions are the shims. Any other DLL is missing.
+fn module_handle(name: &str, load: bool) -> *mut c_void {
+    let found = if load {
+        crate::module::find_or_load(name)
+    } else {
+        crate::module::find(name)
+    };
+    if let Some(module) = found {
+        return module.base as *mut c_void;
+    }
+    if !crate::module::is_system(name) {
+        LAST_ERROR.store(126, Ordering::SeqCst); // ERROR_MOD_NOT_FOUND
+        return std::ptr::null_mut();
+    }
+    let lower = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .to_lowercase();
+    let dll = if lower.ends_with(".dll") {
+        lower
+    } else {
+        format!("{lower}.dll")
+    };
+    let mut modules = get_modules().lock().unwrap();
+    if let Some((&handle, _)) = modules.iter().find(|(_, n)| **n == dll) {
+        return handle as *mut c_void;
+    }
+    let handle = NEXT_HANDLE.fetch_add(1, Ordering::SeqCst) as usize;
+    modules.insert(handle, dll);
+    handle as *mut c_void
+}
+
 // The system DLLs GetModuleHandleW has handed out a handle for, by handle
 static MODULES: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
 
@@ -1355,7 +1413,7 @@ import_fn! {
         0
     }
 
-    // The only module this process has, as far as the DLL can tell, is the DLL itself
+    // With no name, the module the process started from, which for the DLL is d3dcompiler_47
     fn GetModuleHandleW(lpModuleName: *const u16) -> *mut c_void {
         trace_call!("kernel32!GetModuleHandleW", "name={}", if lpModuleName.is_null() {
             "<null>".to_string()
@@ -1365,20 +1423,7 @@ import_fn! {
         if lpModuleName.is_null() {
             return super::DLL_MAP_BASE.load(Ordering::Relaxed) as *mut c_void;
         }
-        let name = wstr_to_string(lpModuleName);
-        let name = String::from_utf8_lossy(&name[..name.len() - 1]).to_lowercase();
-        if name.trim_end_matches(".dll") == "d3dcompiler_47" {
-            return super::DLL_MAP_BASE.load(Ordering::Relaxed) as *mut c_void;
-        }
-        // Every system DLL is loaded as far as the DLL can tell; its functions are the shims
-        let dll = if name.ends_with(".dll") { name } else { format!("{name}.dll") };
-        let mut modules = get_modules().lock().unwrap();
-        if let Some((&handle, _)) = modules.iter().find(|(_, n)| **n == dll) {
-            return handle as *mut c_void;
-        }
-        let handle = NEXT_HANDLE.fetch_add(1, Ordering::SeqCst) as usize;
-        modules.insert(handle, dll);
-        handle as *mut c_void
+        module_handle(&wide_to_string(lpModuleName), false)
     }
 
     // An SLIST_HEADER is 16 bytes, empty when zeroed
