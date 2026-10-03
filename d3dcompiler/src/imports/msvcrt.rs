@@ -1093,3 +1093,198 @@ unsafe extern "win64" fn sscanf_impl(
         )
     }
 }
+
+// ============ Universal CRT ============
+// The Universal CRT's entry points that Microsoft's own DLLs import with an _o_ prefix, and that
+// have no msvcrt equivalent: DLL startup and shutdown, and the stdio functions every printf and
+// scanf variant goes through.
+
+import_fn! {
+    fn calloc(count: usize, size: usize) -> *mut c_void {
+        trace_call!("ucrt!calloc", "count={}, size={}", count, size);
+        libc::calloc(count, size)
+    }
+
+    fn _configure_narrow_argv(_mode: i32) -> i32 {
+        trace_call!("ucrt!_configure_narrow_argv");
+        0
+    }
+
+    fn _initialize_narrow_environment() -> i32 {
+        trace_call!("ucrt!_initialize_narrow_environment");
+        0
+    }
+
+    // A DLL's atexit table runs when it unloads, and this one stays loaded for the life of the process
+    fn _initialize_onexit_table(_table: *mut c_void) -> i32 {
+        trace_call!("ucrt!_initialize_onexit_table");
+        0
+    }
+
+    fn _register_onexit_function(_table: *mut c_void, _func: *const c_void) -> i32 {
+        trace_call!("ucrt!_register_onexit_function");
+        0
+    }
+
+    fn _execute_onexit_table(_table: *mut c_void) -> i32 {
+        trace_call!("ucrt!_execute_onexit_table");
+        0
+    }
+
+    fn _crt_atexit(_func: *const c_void) -> i32 {
+        trace_call!("ucrt!_crt_atexit");
+        0
+    }
+
+    fn _cexit() {
+        trace_call!("ucrt!_cexit");
+    }
+
+    fn __std_type_info_destroy_list(_list: *mut c_void) {
+        trace_call!("ucrt!__std_type_info_destroy_list");
+    }
+
+    // EXCEPTION_CONTINUE_SEARCH
+    fn _seh_filter_dll(_code: u32, _info: *mut c_void) -> i32 {
+        trace_call!("ucrt!_seh_filter_dll");
+        0
+    }
+
+    fn _invalid_parameter_noinfo() {
+        trace_call!("ucrt!_invalid_parameter_noinfo");
+        panic!("ucrt!_invalid_parameter_noinfo: the DLL passed an invalid parameter to the C runtime");
+    }
+
+    fn _wtoi(s: *const u16) -> i32 {
+        trace_call!("ucrt!_wtoi");
+        let narrow = wstr_to_string(s);
+        libc::atoi(narrow.as_ptr() as *const i8)
+    }
+
+    // _O_WRONLY 1, _O_RDWR 2, _O_APPEND 8, _O_CREAT 0x100, _O_TRUNC 0x200, _O_EXCL 0x400; text and
+    // binary modes do not exist here
+    fn _wsopen_s(pfh: *mut i32, filename: *const u16, oflag: i32, _shflag: i32, pmode: i32) -> i32 {
+        trace_call!("ucrt!_wsopen_s");
+        let path = wstr_to_string(filename);
+        let mut flags = match oflag & 3 {
+            1 => libc::O_WRONLY,
+            2 => libc::O_RDWR,
+            _ => libc::O_RDONLY,
+        };
+        if oflag & 0x8 != 0 { flags |= libc::O_APPEND; }
+        if oflag & 0x100 != 0 { flags |= libc::O_CREAT; }
+        if oflag & 0x200 != 0 { flags |= libc::O_TRUNC; }
+        if oflag & 0x400 != 0 { flags |= libc::O_EXCL; }
+        let fd = libc::open(path.as_ptr() as *const i8, flags, if pmode != 0 { 0o644 } else { 0 });
+        *pfh = fd;
+        if fd < 0 { *libc::__errno_location() } else { 0 }
+    }
+
+    fn __stdio_common_vsprintf(
+        _options: u64,
+        buffer: *mut i8,
+        count: usize,
+        format: *const i8,
+        _locale: *mut c_void,
+        arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vsprintf");
+        super::printf::vsnprintf_core(buffer, count, format, arglist as *const u64)
+    }
+
+    fn __stdio_common_vsprintf_s(
+        _options: u64,
+        buffer: *mut i8,
+        count: usize,
+        format: *const i8,
+        _locale: *mut c_void,
+        arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vsprintf_s");
+        super::printf::vsnprintf_core(buffer, count, format, arglist as *const u64)
+    }
+
+    fn __stdio_common_vsnprintf_s(
+        _options: u64,
+        buffer: *mut i8,
+        count: usize,
+        max_count: usize,
+        format: *const i8,
+        _locale: *mut c_void,
+        arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vsnprintf_s");
+        let limit = if max_count == usize::MAX { count } else { count.min(max_count + 1) };
+        super::printf::vsnprintf_core(buffer, limit, format, arglist as *const u64)
+    }
+
+    fn __stdio_common_vswprintf(
+        _options: u64,
+        _buffer: *mut u16,
+        _count: usize,
+        _format: *const u16,
+        _locale: *mut c_void,
+        _arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vswprintf");
+        panic!("ucrt!__stdio_common_vswprintf not implemented");
+    }
+
+    fn __stdio_common_vswprintf_s(
+        _options: u64,
+        _buffer: *mut u16,
+        _count: usize,
+        _format: *const u16,
+        _locale: *mut c_void,
+        _arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vswprintf_s");
+        panic!("ucrt!__stdio_common_vswprintf_s not implemented");
+    }
+
+    fn __stdio_common_vsnwprintf_s(
+        _options: u64,
+        _buffer: *mut u16,
+        _count: usize,
+        _max_count: usize,
+        _format: *const u16,
+        _locale: *mut c_void,
+        _arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vsnwprintf_s");
+        panic!("ucrt!__stdio_common_vsnwprintf_s not implemented");
+    }
+
+    fn __stdio_common_vsscanf(
+        _options: u64,
+        _buffer: *const i8,
+        _buffer_count: usize,
+        _format: *const i8,
+        _locale: *mut c_void,
+        _arglist: *mut c_void,
+    ) -> i32 {
+        trace_call!("ucrt!__stdio_common_vsscanf");
+        panic!("ucrt!__stdio_common_vsscanf not implemented");
+    }
+}
+
+// ============ Universal CRT - DLL entry ============
+
+// Runs each initializer in the table and stops at the first that fails
+import_fn! {
+    fn _initterm_e(start: *const *const c_void, end: *const *const c_void) -> i32 {
+        trace_call!("ucrt!_initterm_e");
+        let mut p = start;
+        while p < end {
+            if !(*p).is_null() {
+                let f: extern "win64" fn() -> i32 = std::mem::transmute(*p);
+                let r = f();
+                if r != 0 {
+                    return r;
+                }
+            }
+            p = p.add(1);
+        }
+        0
+    }
+}
