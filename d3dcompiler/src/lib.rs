@@ -1547,6 +1547,12 @@ mod linux_loader {
             "GetFileSize" => imports::kernel32::GetFileSize as *const () as usize,
             "GetFileSizeEx" => imports::kernel32::GetFileSizeEx as *const () as usize,
             "GetFileType" => imports::kernel32::GetFileType as *const () as usize,
+            "GetStdHandle" => imports::kernel32::GetStdHandle as *const () as usize,
+            "GetConsoleScreenBufferInfo" => {
+                imports::kernel32::GetConsoleScreenBufferInfo as *const () as usize
+            }
+            "GetConsoleMode" => imports::kernel32::GetConsoleMode as *const () as usize,
+            "GetConsoleOutputCP" => imports::kernel32::GetConsoleOutputCP as *const () as usize,
             "SetFilePointer" => imports::kernel32::SetFilePointer as *const () as usize,
             "SetFilePointerEx" => imports::kernel32::SetFilePointerEx as *const () as usize,
             "SetEndOfFile" => imports::kernel32::SetEndOfFile as *const () as usize,
