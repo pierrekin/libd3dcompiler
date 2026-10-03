@@ -194,6 +194,11 @@ import_fn! {
         r
     }
 
+    fn strlen(s: *const i8) -> usize {
+        trace_call!("msvcrt!strlen");
+        libc::strlen(s)
+    }
+
     fn strnlen(s: *const i8, max_len: usize) -> usize {
         trace_call!("msvcrt!strnlen");
         libc::strnlen(s, max_len)
