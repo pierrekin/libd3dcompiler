@@ -34,14 +34,12 @@ pub fn to_original_va(addr: usize) -> usize {
 
 macro_rules! trace_call {
     ($name:expr) => {
-        // let ret_addr = $crate::imports::CALLER_ADDR.load(std::sync::atomic::Ordering::Relaxed);
-        // let original_va = $crate::imports::to_original_va(ret_addr);
-        // eprintln!("[IMPORT] {:#x} {}", original_va, $name);
+        #[cfg(feature = "trace-imports")]
+        eprintln!("[IMPORT] {}", $name);
     };
     ($name:expr, $($arg:tt)*) => {
-        // let ret_addr = $crate::imports::CALLER_ADDR.load(std::sync::atomic::Ordering::Relaxed);
-        // let original_va = $crate::imports::to_original_va(ret_addr);
-        // eprintln!("[IMPORT] {:#x} {} - {}", original_va, $name, format!($($arg)*));
+        #[cfg(feature = "trace-imports")]
+        eprintln!("[IMPORT] {} - {}", $name, format!($($arg)*));
     };
 }
 
