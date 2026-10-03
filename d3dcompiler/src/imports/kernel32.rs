@@ -571,6 +571,43 @@ import_fn! {
         }
     }
 
+    // The process's stdin, stdout and stderr (STD_INPUT_HANDLE -10, STD_OUTPUT_HANDLE -11,
+    // STD_ERROR_HANDLE -12). Each is a handle to a duplicate of the descriptor, made once, so a DLL
+    // that closes it leaves the process's own descriptor open.
+    fn GetStdHandle(nStdHandle: u32) -> *mut c_void {
+        trace_call!("kernel32!GetStdHandle", "id={}", nStdHandle as i32);
+        static STD: [std::sync::OnceLock<usize>; 3] = [const { std::sync::OnceLock::new() }; 3];
+        let fd = match nStdHandle as i32 {
+            -10 => 0,
+            -11 => 1,
+            -12 => 2,
+            _ => return (-1isize) as *mut c_void,
+        };
+        *STD[fd as usize].get_or_init(|| {
+            let copy = libc::dup(fd);
+            if copy < 0 { usize::MAX } else { alloc_handle(copy) }
+        }) as *mut c_void
+    }
+
+    // This process has no console, so the console calls fail as Windows' do for a handle that is not
+    // one: ERROR_INVALID_HANDLE, and GetConsoleOutputCP's 0
+    fn GetConsoleScreenBufferInfo(_hConsoleOutput: *mut c_void, _lpInfo: *mut c_void) -> i32 {
+        trace_call!("kernel32!GetConsoleScreenBufferInfo");
+        LAST_ERROR.store(6, Ordering::SeqCst);
+        0
+    }
+
+    fn GetConsoleMode(_hConsoleHandle: *mut c_void, _lpMode: *mut u32) -> i32 {
+        trace_call!("kernel32!GetConsoleMode");
+        LAST_ERROR.store(6, Ordering::SeqCst);
+        0
+    }
+
+    fn GetConsoleOutputCP() -> u32 {
+        trace_call!("kernel32!GetConsoleOutputCP");
+        0
+    }
+
     fn GetFileType(_hFile: *mut c_void) -> u32 {
         trace_call!("kernel32!GetFileType");
         1
