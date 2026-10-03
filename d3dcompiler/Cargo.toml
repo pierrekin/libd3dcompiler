@@ -24,3 +24,5 @@ default = ["embed-dll"]
 embed-dll = []
 # Enable debug logging for reflection wrapper
 debug-logs = []
+# Log every call the DLL makes into the shims
+trace-imports = []
