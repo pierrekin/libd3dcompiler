@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::Cell;
 
 // The C runtime's character classes for the "C" locale, as Microsoft's runtime returns them:
 // _UPPER 0x1, _LOWER 0x2, _DIGIT 0x4, _SPACE 0x8, _PUNCT 0x10, _CONTROL 0x20, _BLANK 0x40, _HEX 0x80,
@@ -410,11 +411,6 @@ import_fn! {
         let r = ctype(c) & 0x4;
         trace_call!("msvcrt!isdigit", "c=0x{:x} -> 0x{:x}", c, r);
         r
-    }
-
-    fn iswdigit(c: u16) -> i32 {
-        trace_call!("msvcrt!iswdigit");
-        matches!(c, 0x30..=0x39) as i32
     }
 
     fn isspace(c: i32) -> i32 {
@@ -1036,9 +1032,16 @@ import_fn! {
         panic!("msvcrt!_wgetenv not implemented");
     }
 
+    // Only the "C" locale exists. Microsoft numbers the categories differently from glibc, and
+    // glibc's locale must not change under the DLL, so neither is consulted.
     fn setlocale(category: i32, locale: *const i8) -> *mut i8 {
-        trace_call!("msvcrt!setlocale");
-        libc::setlocale(category, locale)
+        let _ = category;
+        let wanted = if locale.is_null() { None } else { Some(std::ffi::CStr::from_ptr(locale).to_bytes()) };
+        trace_call!("msvcrt!setlocale", "category={} locale={:?}", category, wanted.map(String::from_utf8_lossy));
+        match wanted {
+            None | Some(b"") | Some(b"C") => c"C".as_ptr() as *mut i8,
+            Some(_) => std::ptr::null_mut(),
+        }
     }
 
     fn _time64(timer: *mut i64) -> i64 {
@@ -1525,5 +1528,330 @@ import_fn! {
             p = p.add(1);
         }
         0
+    }
+}
+
+// ============ Universal CRT - for Microsoft's C++ runtime and DXC ============
+
+unsafe extern "C" {
+    fn frexp(x: f64, exp: *mut i32) -> f64;
+    fn ldexp(x: f64, exp: i32) -> f64;
+    fn flockfile(f: *mut libc::FILE);
+    fn funlockfile(f: *mut libc::FILE);
+    static mut stdin: *mut libc::FILE;
+    static mut stdout: *mut libc::FILE;
+    static mut stderr: *mut libc::FILE;
+}
+
+// The "C" locale's ctype table, as __pctype_func hands it out: indexed from -1 (EOF) to 255
+static PCTYPE: OnceLock<[u16; 257]> = OnceLock::new();
+
+fn pctype() -> *const u16 {
+    let table = PCTYPE.get_or_init(|| {
+        let mut t = [0u16; 257];
+        for c in 0..256 {
+            t[c + 1] = ctype(c as i32) as u16;
+        }
+        t
+    });
+    unsafe { table.as_ptr().add(1) }
+}
+
+// Microsoft's struct lconv for the "C" locale: ten narrow strings, eight chars, eight wide strings
+#[repr(C)]
+struct Lconv {
+    narrow: [*const i8; 10],
+    chars: [i8; 8],
+    wide: [*const u16; 8],
+}
+unsafe impl Send for Lconv {}
+unsafe impl Sync for Lconv {}
+
+static LCONV: OnceLock<Lconv> = OnceLock::new();
+static WIDE_DOT: [u16; 2] = [b'.' as u16, 0];
+static WIDE_EMPTY: [u16; 1] = [0];
+
+// Six locale names, one per category, all null in the "C" locale
+static LOCALE_NAMES: [usize; 6] = [0; 6];
+
+// Microsoft's long is 32 bits: strtol and strtoul clamp to its range and report ERANGE
+unsafe fn strtol32(s: *const i8, endptr: *mut *mut i8, base: i32) -> i32 {
+    let v = libc::strtol(s, endptr, base);
+    if v > i32::MAX as i64 {
+        *libc::__errno_location() = libc::ERANGE;
+        i32::MAX
+    } else if v < i32::MIN as i64 {
+        *libc::__errno_location() = libc::ERANGE;
+        i32::MIN
+    } else {
+        v as i32
+    }
+}
+
+thread_local! {
+    // rand's state, per thread, seeded with 1 as Microsoft's is
+    static RAND_SEED: Cell<u32> = const { Cell::new(1) };
+}
+
+unsafe fn wcslen16(s: *const u16) -> usize {
+    let mut n = 0;
+    while *s.add(n) != 0 {
+        n += 1;
+    }
+    n
+}
+
+import_fn! {
+    // math
+    fn acosf(x: f32) -> f32 { trace_call!("ucrt!acosf"); x.acos() }
+    fn asinf(x: f32) -> f32 { trace_call!("ucrt!asinf"); x.asin() }
+    fn atanf(x: f32) -> f32 { trace_call!("ucrt!atanf"); x.atan() }
+    fn atan2f(y: f32, x: f32) -> f32 { trace_call!("ucrt!atan2f"); y.atan2(x) }
+    fn ceilf(x: f32) -> f32 { trace_call!("ucrt!ceilf"); x.ceil() }
+    fn copysign(x: f64, y: f64) -> f64 { trace_call!("ucrt!copysign"); x.copysign(y) }
+    fn cosf(x: f32) -> f32 { trace_call!("ucrt!cosf"); x.cos() }
+    fn coshf(x: f32) -> f32 { trace_call!("ucrt!coshf"); x.cosh() }
+    fn exp2(x: f64) -> f64 { trace_call!("ucrt!exp2"); x.exp2() }
+    fn exp2f(x: f32) -> f32 { trace_call!("ucrt!exp2f"); x.exp2() }
+    fn expf(x: f32) -> f32 { trace_call!("ucrt!expf"); x.exp() }
+    fn fabs(x: f64) -> f64 { trace_call!("ucrt!fabs"); x.abs() }
+    fn frexp_(x: f64, exp: *mut i32) -> f64 { trace_call!("ucrt!frexp"); frexp(x, exp) }
+    fn ldexp_(x: f64, exp: i32) -> f64 { trace_call!("ucrt!ldexp"); ldexp(x, exp) }
+    fn log10(x: f64) -> f64 { trace_call!("ucrt!log10"); x.log10() }
+    fn log10f(x: f32) -> f32 { trace_call!("ucrt!log10f"); x.log10() }
+    fn log2(x: f64) -> f64 { trace_call!("ucrt!log2"); x.log2() }
+    fn log2f(x: f32) -> f32 { trace_call!("ucrt!log2f"); x.log2() }
+    fn logf(x: f32) -> f32 { trace_call!("ucrt!logf"); x.ln() }
+    fn nearbyint(x: f64) -> f64 { trace_call!("ucrt!nearbyint"); x.round_ties_even() }
+    fn nearbyintf(x: f32) -> f32 { trace_call!("ucrt!nearbyintf"); x.round_ties_even() }
+    fn powf(x: f32, y: f32) -> f32 { trace_call!("ucrt!powf"); x.powf(y) }
+    fn round(x: f64) -> f64 { trace_call!("ucrt!round"); x.round() }
+    fn roundf(x: f32) -> f32 { trace_call!("ucrt!roundf"); x.round() }
+    fn sinf(x: f32) -> f32 { trace_call!("ucrt!sinf"); x.sin() }
+    fn sinhf(x: f32) -> f32 { trace_call!("ucrt!sinhf"); x.sinh() }
+    fn sqrtf(x: f32) -> f32 { trace_call!("ucrt!sqrtf"); x.sqrt() }
+    fn tanf(x: f32) -> f32 { trace_call!("ucrt!tanf"); x.tan() }
+    fn tanhf(x: f32) -> f32 { trace_call!("ucrt!tanhf"); x.tanh() }
+    fn trunc(x: f64) -> f64 { trace_call!("ucrt!trunc"); x.trunc() }
+    fn truncf(x: f32) -> f32 { trace_call!("ucrt!truncf"); x.trunc() }
+
+    // the floating-point environment: only round-to-nearest, which is also the default
+    fn fegetround() -> i32 { trace_call!("ucrt!fegetround"); 0 }
+    fn fesetround(round: i32) -> i32 { trace_call!("ucrt!fesetround", "{}", round); (round != 0) as i32 }
+
+    // _CW_DEFAULT: round to nearest, 53-bit precision, every exception masked
+    fn _controlfp_s(current: *mut u32, _new: u32, _mask: u32) -> i32 {
+        trace_call!("ucrt!_controlfp_s");
+        if !current.is_null() {
+            *current = 0x8001F;
+        }
+        0
+    }
+
+    // strings
+    fn islower(c: i32) -> i32 { trace_call!("ucrt!islower"); ctype(c) & 0x2 }
+    fn isupper(c: i32) -> i32 { trace_call!("ucrt!isupper"); ctype(c) & 0x1 }
+    fn isprint(c: i32) -> i32 { trace_call!("ucrt!isprint"); ctype(c) & 0x157 }
+    fn iswalnum(c: u16) -> i32 { trace_call!("ucrt!iswalnum"); if c < 256 { ctype(c as i32) & 0x107 } else { 0 } }
+    fn iswdigit(c: u16) -> i32 { trace_call!("ucrt!iswdigit"); if c < 256 { ctype(c as i32) & 0x4 } else { 0 } }
+    fn iswspace(c: u16) -> i32 { trace_call!("ucrt!iswspace"); if c < 256 { ctype(c as i32) & 0x8 } else { 0 } }
+    fn iswxdigit(c: u16) -> i32 { trace_call!("ucrt!iswxdigit"); if c < 256 { ctype(c as i32) & 0x80 } else { 0 } }
+    fn strcpy(dst: *mut i8, src: *const i8) -> *mut i8 { trace_call!("ucrt!strcpy"); libc::strcpy(dst, src) }
+    fn strncpy(dst: *mut i8, src: *const i8, n: usize) -> *mut i8 { trace_call!("ucrt!strncpy"); libc::strncpy(dst, src, n) }
+    fn strcspn(s: *const i8, reject: *const i8) -> usize { trace_call!("ucrt!strcspn"); libc::strcspn(s, reject) }
+    fn strpbrk(s: *const i8, accept: *const i8) -> *mut i8 { trace_call!("ucrt!strpbrk"); libc::strpbrk(s, accept) }
+    fn __strncnt(s: *const i8, n: usize) -> usize { trace_call!("ucrt!__strncnt"); libc::strnlen(s, n) }
+    fn wcslen(s: *const u16) -> usize { trace_call!("ucrt!wcslen"); wcslen16(s) }
+    fn wcsnlen(s: *const u16, n: usize) -> usize {
+        trace_call!("ucrt!wcsnlen");
+        let mut i = 0;
+        while i < n && *s.add(i) != 0 {
+            i += 1;
+        }
+        i
+    }
+    fn wcscmp(a: *const u16, b: *const u16) -> i32 {
+        trace_call!("ucrt!wcscmp");
+        let mut i = 0;
+        loop {
+            let (x, y) = (*a.add(i), *b.add(i));
+            if x != y {
+                return if x < y { -1 } else { 1 };
+            }
+            if x == 0 {
+                return 0;
+            }
+            i += 1;
+        }
+    }
+
+    // conversion
+    fn atol(s: *const i8) -> i32 { trace_call!("ucrt!atol"); strtol32(s, std::ptr::null_mut(), 10) }
+    fn strtol(s: *const i8, endptr: *mut *mut i8, base: i32) -> i32 { trace_call!("ucrt!strtol"); strtol32(s, endptr, base) }
+    fn strtoll(s: *const i8, endptr: *mut *mut i8, base: i32) -> i64 { trace_call!("ucrt!strtoll"); libc::strtoll(s, endptr, base) }
+    fn strtoull(s: *const i8, endptr: *mut *mut i8, base: i32) -> u64 { trace_call!("ucrt!strtoull"); libc::strtoull(s, endptr, base) }
+    fn strtof(s: *const i8, endptr: *mut *mut i8) -> f32 { trace_call!("ucrt!strtof"); libc::strtof(s, endptr) }
+    // in the "C" locale every byte is the wide character of the same value
+    fn btowc(c: i32) -> u32 { trace_call!("ucrt!btowc"); if (0..256).contains(&c) { c as u32 } else { 0xFFFF } }
+
+    // heap
+    fn realloc(p: *mut c_void, size: usize) -> *mut c_void { trace_call!("ucrt!realloc"); super::heap::realloc(p, size, false) }
+    fn _recalloc(p: *mut c_void, count: usize, size: usize) -> *mut c_void {
+        trace_call!("ucrt!_recalloc");
+        let Some(total) = count.checked_mul(size) else {
+            return std::ptr::null_mut();
+        };
+        super::heap::realloc(p, total, true)
+    }
+
+    // utility
+    fn rand() -> i32 {
+        trace_call!("ucrt!rand");
+        RAND_SEED.with(|seed| {
+            let s = seed.get().wrapping_mul(214013).wrapping_add(2531011);
+            seed.set(s);
+            ((s >> 16) & 0x7FFF) as i32
+        })
+    }
+    fn rand_s(value: *mut u32) -> i32 {
+        trace_call!("ucrt!rand_s");
+        libc::getrandom(value as *mut c_void, 4, 0);
+        0
+    }
+
+    fn _wgetcwd(buffer: *mut u16, size: i32) -> *mut u16 {
+        trace_call!("ucrt!_wgetcwd");
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        let wide: Vec<u16> = cwd.encode_utf16().chain([0]).collect();
+        let out = if buffer.is_null() {
+            super::heap::alloc(wide.len().max(size as usize) * 2, false) as *mut u16
+        } else if wide.len() > size as usize {
+            *libc::__errno_location() = libc::ERANGE;
+            return std::ptr::null_mut();
+        } else {
+            buffer
+        };
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), out, wide.len());
+        out
+    }
+
+    // runtime
+    fn abort() { trace_call!("ucrt!abort"); std::process::abort() }
+    fn exit(code: i32) { trace_call!("ucrt!exit"); std::process::exit(code) }
+    fn _invalid_parameter_noinfo_noreturn() {
+        trace_call!("ucrt!_invalid_parameter_noinfo_noreturn");
+        eprintln!("[d3dcompiler] the DLL passed an invalid parameter to the C runtime");
+        std::process::abort()
+    }
+    fn _invoke_watson(_expression: *const u16, _function: *const u16, _file: *const u16, _line: u32, _reserved: usize) {
+        trace_call!("ucrt!_invoke_watson");
+        eprintln!("[d3dcompiler] the DLL asked the C runtime to report a fatal error");
+        std::process::abort()
+    }
+    fn _resetstkoflw() -> i32 { trace_call!("ucrt!_resetstkoflw"); 1 }
+    fn _set_new_handler(_handler: *mut c_void) -> *mut c_void { trace_call!("ucrt!_set_new_handler"); std::ptr::null_mut() }
+    fn _crt_at_quick_exit(_function: *mut c_void) -> i32 { trace_call!("ucrt!_crt_at_quick_exit"); 0 }
+
+    // locale: always the "C" locale
+    fn ___lc_codepage_func() -> u32 { trace_call!("ucrt!___lc_codepage_func"); 0 }
+    fn ___lc_collate_cp_func() -> u32 { trace_call!("ucrt!___lc_collate_cp_func"); 0 }
+    fn ___lc_locale_name_func() -> *const usize { trace_call!("ucrt!___lc_locale_name_func"); LOCALE_NAMES.as_ptr() }
+    fn ___mb_cur_max_func() -> i32 { trace_call!("ucrt!___mb_cur_max_func"); 1 }
+    fn __pctype_func() -> *const u16 { trace_call!("ucrt!__pctype_func"); pctype() }
+    fn _lock_locales() { trace_call!("ucrt!_lock_locales"); }
+    fn _unlock_locales() { trace_call!("ucrt!_unlock_locales"); }
+    fn localeconv() -> *const c_void {
+        trace_call!("ucrt!localeconv");
+        let lconv = LCONV.get_or_init(|| {
+            let empty = c"".as_ptr();
+            let mut narrow = [empty; 10];
+            narrow[0] = c".".as_ptr();
+            let mut wide = [WIDE_EMPTY.as_ptr(); 8];
+            wide[0] = WIDE_DOT.as_ptr();
+            Lconv { narrow, chars: [i8::MAX; 8], wide }
+        });
+        lconv as *const Lconv as *const c_void
+    }
+
+    // stdio, on glibc's FILE
+    fn __acrt_iob_func(index: u32) -> *mut c_void {
+        trace_call!("ucrt!__acrt_iob_func", "{}", index);
+        (match index {
+            0 => stdin,
+            1 => stdout,
+            _ => stderr,
+        }) as *mut c_void
+    }
+    fn fflush(f: *mut c_void) -> i32 { trace_call!("ucrt!fflush"); libc::fflush(f as *mut libc::FILE) }
+    fn fgetc(f: *mut c_void) -> i32 { trace_call!("ucrt!fgetc"); libc::fgetc(f as *mut libc::FILE) }
+    fn fputc(c: i32, f: *mut c_void) -> i32 { trace_call!("ucrt!fputc"); libc::fputc(c, f as *mut libc::FILE) }
+    fn fputs(s: *const i8, f: *mut c_void) -> i32 { trace_call!("ucrt!fputs"); libc::fputs(s, f as *mut libc::FILE) }
+    fn puts(s: *const i8) -> i32 { trace_call!("ucrt!puts"); libc::puts(s) }
+    fn ungetc(c: i32, f: *mut c_void) -> i32 { trace_call!("ucrt!ungetc"); libc::ungetc(c, f as *mut libc::FILE) }
+    fn fwrite(p: *const c_void, size: usize, count: usize, f: *mut c_void) -> usize {
+        trace_call!("ucrt!fwrite");
+        libc::fwrite(p, size, count, f as *mut libc::FILE)
+    }
+    fn setvbuf(f: *mut c_void, buf: *mut i8, mode: i32, size: usize) -> i32 {
+        trace_call!("ucrt!setvbuf");
+        // Microsoft's _IOFBF 0, _IOLBF 0x40, _IONBF 0x4
+        let mode = match mode {
+            0x4 => libc::_IONBF,
+            0x40 => libc::_IOLBF,
+            _ => libc::_IOFBF,
+        };
+        libc::setvbuf(f as *mut libc::FILE, buf, mode, size)
+    }
+    fn _fseeki64(f: *mut c_void, offset: i64, whence: i32) -> i32 { trace_call!("ucrt!_fseeki64"); libc::fseeko(f as *mut libc::FILE, offset, whence) }
+    // Microsoft's fpos_t is the 64-bit offset
+    fn fgetpos(f: *mut c_void, pos: *mut i64) -> i32 {
+        trace_call!("ucrt!fgetpos");
+        let p = libc::ftello(f as *mut libc::FILE);
+        if p < 0 {
+            return -1;
+        }
+        *pos = p;
+        0
+    }
+    fn fsetpos(f: *mut c_void, pos: *const i64) -> i32 { trace_call!("ucrt!fsetpos"); libc::fseeko(f as *mut libc::FILE, *pos, libc::SEEK_SET) }
+    fn _lock_file(f: *mut c_void) { trace_call!("ucrt!_lock_file"); flockfile(f as *mut libc::FILE) }
+    fn _unlock_file(f: *mut c_void) { trace_call!("ucrt!_unlock_file"); funlockfile(f as *mut libc::FILE) }
+    fn _fsopen(name: *const i8, mode: *const i8, _shflag: i32) -> *mut c_void {
+        trace_call!("ucrt!_fsopen");
+        libc::fopen(name, mode) as *mut c_void
+    }
+    // every stream is binary; the previous mode was too (_O_BINARY)
+    fn _setmode(_fd: i32, _mode: i32) -> i32 { trace_call!("ucrt!_setmode"); 0x8000 }
+    fn _lseek(fd: i32, offset: i32, whence: i32) -> i32 { trace_call!("ucrt!_lseek"); libc::lseek(fd, offset as i64, whence) as i32 }
+    // Microsoft's C++ streams read and write a FILE's buffer in place, through these pointers.
+    // Each stream gets an empty buffer of its own, so every read and write goes through the
+    // stream's functions instead.
+    fn _get_stream_buffer_pointers(f: *mut c_void, base: *mut *mut *mut i8, ptr: *mut *mut *mut i8, count: *mut *mut i32) -> i32 {
+        trace_call!("ucrt!_get_stream_buffer_pointers");
+        #[repr(C)]
+        struct Empty { base: *mut i8, ptr: *mut i8, count: i32 }
+        let _ = f;
+        let empty = Box::leak(Box::new(Empty { base: std::ptr::null_mut(), ptr: std::ptr::null_mut(), count: 0 }));
+        if !base.is_null() {
+            *base = &mut empty.base;
+        }
+        if !ptr.is_null() {
+            *ptr = &mut empty.ptr;
+        }
+        if !count.is_null() {
+            *count = &mut empty.count;
+        }
+        0
+    }
+
+    fn __stdio_common_vfprintf(options: u64, f: *mut c_void, format: *const i8, _locale: *mut c_void, arglist: *mut c_void) -> i32 {
+        trace_call!("ucrt!__stdio_common_vfprintf");
+        let len = common_vsprintf(options | 2, std::ptr::null_mut(), 0, format, arglist);
+        if len < 0 {
+            return len;
+        }
+        let mut buf = vec![0i8; len as usize + 1];
+        common_vsprintf(options | 2, buf.as_mut_ptr(), buf.len(), format, arglist);
+        libc::fwrite(buf.as_ptr() as *const c_void, 1, len as usize, f as *mut libc::FILE) as i32
     }
 }

@@ -876,8 +876,13 @@ import_fn! {
 
     fn InitializeCriticalSection(lpCriticalSection: *mut c_void) {
         trace_call!("kernel32!InitializeCriticalSection");
+        // a thread may enter a critical section it already holds
         let cs = lpCriticalSection as *mut libc::pthread_mutex_t;
-        libc::pthread_mutex_init(cs, std::ptr::null());
+        let mut attr: libc::pthread_mutexattr_t = std::mem::zeroed();
+        libc::pthread_mutexattr_init(&mut attr);
+        libc::pthread_mutexattr_settype(&mut attr, libc::PTHREAD_MUTEX_RECURSIVE);
+        libc::pthread_mutex_init(cs, &attr);
+        libc::pthread_mutexattr_destroy(&mut attr);
     }
 
     fn InitializeCriticalSectionAndSpinCount(
@@ -1402,4 +1407,371 @@ import_fn! {
         trace_call!("kernel32!InitializeSListHead");
         std::ptr::write_bytes(ListHead as *mut u8, 0, 16);
     }
+}
+
+// ============ KERNEL32 - slim locks, condition variables and one-time init ============
+
+// An SRWLOCK and a CONDITION_VARIABLE are a pointer each, zero when unused. A lock's low 32 bits
+// hold its state: the writer bit, or the count of readers. A condition variable's low 32 bits
+// count wakes, which a sleeper waits to change.
+const SRW_WRITER: u32 = 1 << 31;
+
+unsafe fn futex_word(p: *mut c_void) -> &'static std::sync::atomic::AtomicU32 {
+    &*(p as *const std::sync::atomic::AtomicU32)
+}
+
+unsafe fn futex_wait(word: &std::sync::atomic::AtomicU32, expected: u32, timeout_ms: u32) -> bool {
+    let ts;
+    let timeout = if timeout_ms == 0xFFFFFFFF {
+        std::ptr::null()
+    } else {
+        ts = libc::timespec {
+            tv_sec: (timeout_ms / 1000) as i64,
+            tv_nsec: (timeout_ms % 1000) as i64 * 1_000_000,
+        };
+        &ts as *const libc::timespec
+    };
+    let r = libc::syscall(
+        libc::SYS_futex,
+        word.as_ptr(),
+        libc::FUTEX_WAIT | libc::FUTEX_PRIVATE_FLAG,
+        expected,
+        timeout,
+    );
+    !(r == -1 && *libc::__errno_location() == libc::ETIMEDOUT)
+}
+
+unsafe fn futex_wake(word: &std::sync::atomic::AtomicU32, count: i32) {
+    libc::syscall(
+        libc::SYS_futex,
+        word.as_ptr(),
+        libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG,
+        count,
+    );
+}
+
+unsafe fn srw_lock_exclusive(lock: *mut c_void) {
+    let word = futex_word(lock);
+    loop {
+        let s = word.load(Ordering::Relaxed);
+        if s == 0
+            && word
+                .compare_exchange(0, SRW_WRITER, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+        {
+            return;
+        }
+        if s != 0 {
+            futex_wait(word, s, 0xFFFFFFFF);
+        }
+    }
+}
+
+unsafe fn srw_lock_shared(lock: *mut c_void) {
+    let word = futex_word(lock);
+    loop {
+        let s = word.load(Ordering::Relaxed);
+        if s & SRW_WRITER == 0 {
+            if word
+                .compare_exchange(s, s + 1, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+        } else {
+            futex_wait(word, s, 0xFFFFFFFF);
+        }
+    }
+}
+
+unsafe fn srw_unlock_exclusive(lock: *mut c_void) {
+    let word = futex_word(lock);
+    word.store(0, Ordering::Release);
+    futex_wake(word, i32::MAX);
+}
+
+unsafe fn srw_unlock_shared(lock: *mut c_void) {
+    let word = futex_word(lock);
+    if word.fetch_sub(1, Ordering::Release) == 1 {
+        futex_wake(word, i32::MAX);
+    }
+}
+
+import_fn! {
+    fn InitializeSRWLock(SRWLock: *mut c_void) {
+        trace_call!("kernel32!InitializeSRWLock");
+        *(SRWLock as *mut usize) = 0;
+    }
+
+    fn AcquireSRWLockExclusive(SRWLock: *mut c_void) {
+        trace_call!("kernel32!AcquireSRWLockExclusive");
+        srw_lock_exclusive(SRWLock);
+    }
+
+    fn AcquireSRWLockShared(SRWLock: *mut c_void) {
+        trace_call!("kernel32!AcquireSRWLockShared");
+        srw_lock_shared(SRWLock);
+    }
+
+    fn TryAcquireSRWLockExclusive(SRWLock: *mut c_void) -> u8 {
+        trace_call!("kernel32!TryAcquireSRWLockExclusive");
+        futex_word(SRWLock).compare_exchange(0, SRW_WRITER, Ordering::Acquire, Ordering::Relaxed).is_ok() as u8
+    }
+
+    fn TryAcquireSRWLockShared(SRWLock: *mut c_void) -> u8 {
+        trace_call!("kernel32!TryAcquireSRWLockShared");
+        let word = futex_word(SRWLock);
+        let s = word.load(Ordering::Relaxed);
+        (s & SRW_WRITER == 0 && word.compare_exchange(s, s + 1, Ordering::Acquire, Ordering::Relaxed).is_ok()) as u8
+    }
+
+    fn ReleaseSRWLockExclusive(SRWLock: *mut c_void) {
+        trace_call!("kernel32!ReleaseSRWLockExclusive");
+        srw_unlock_exclusive(SRWLock);
+    }
+
+    fn ReleaseSRWLockShared(SRWLock: *mut c_void) {
+        trace_call!("kernel32!ReleaseSRWLockShared");
+        srw_unlock_shared(SRWLock);
+    }
+
+    fn InitializeConditionVariable(ConditionVariable: *mut c_void) {
+        trace_call!("kernel32!InitializeConditionVariable");
+        *(ConditionVariable as *mut usize) = 0;
+    }
+
+    // Returns 0 with ERROR_TIMEOUT when the time runs out
+    fn SleepConditionVariableSRW(ConditionVariable: *mut c_void, SRWLock: *mut c_void, dwMilliseconds: u32, Flags: u32) -> i32 {
+        trace_call!("kernel32!SleepConditionVariableSRW");
+        let shared = Flags & 1 != 0; // CONDITION_VARIABLE_LOCKMODE_SHARED
+        let cv = futex_word(ConditionVariable);
+        let seq = cv.load(Ordering::Relaxed);
+        if shared { srw_unlock_shared(SRWLock) } else { srw_unlock_exclusive(SRWLock) }
+        let woken = futex_wait(cv, seq, dwMilliseconds);
+        if shared { srw_lock_shared(SRWLock) } else { srw_lock_exclusive(SRWLock) }
+        if woken {
+            1
+        } else {
+            LAST_ERROR.store(1460, Ordering::SeqCst); // ERROR_TIMEOUT
+            0
+        }
+    }
+
+    fn SleepConditionVariableCS(ConditionVariable: *mut c_void, CriticalSection: *mut c_void, dwMilliseconds: u32) -> i32 {
+        trace_call!("kernel32!SleepConditionVariableCS");
+        let cv = futex_word(ConditionVariable);
+        let seq = cv.load(Ordering::Relaxed);
+        libc::pthread_mutex_unlock(CriticalSection as *mut libc::pthread_mutex_t);
+        let woken = futex_wait(cv, seq, dwMilliseconds);
+        libc::pthread_mutex_lock(CriticalSection as *mut libc::pthread_mutex_t);
+        if woken {
+            1
+        } else {
+            LAST_ERROR.store(1460, Ordering::SeqCst);
+            0
+        }
+    }
+
+    fn WakeConditionVariable(ConditionVariable: *mut c_void) {
+        trace_call!("kernel32!WakeConditionVariable");
+        let cv = futex_word(ConditionVariable);
+        cv.fetch_add(1, Ordering::Release);
+        futex_wake(cv, 1);
+    }
+
+    fn WakeAllConditionVariable(ConditionVariable: *mut c_void) {
+        trace_call!("kernel32!WakeAllConditionVariable");
+        let cv = futex_word(ConditionVariable);
+        cv.fetch_add(1, Ordering::Release);
+        futex_wake(cv, i32::MAX);
+    }
+
+    // An INIT_ONCE is a pointer: 0 before, 1 while the callback runs, 2 after. The callback's
+    // context is not kept.
+    fn InitOnceExecuteOnce(InitOnce: *mut c_void, InitFn: *mut c_void, Parameter: *mut c_void, Context: *mut *mut c_void) -> i32 {
+        trace_call!("kernel32!InitOnceExecuteOnce");
+        type Callback = unsafe extern "win64" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> i32;
+        let state = futex_word(InitOnce);
+        loop {
+            match state.compare_exchange(0, 1, Ordering::Acquire, Ordering::Acquire) {
+                Ok(_) => {
+                    let ok = std::mem::transmute::<*mut c_void, Callback>(InitFn)(InitOnce, Parameter, Context);
+                    state.store(if ok != 0 { 2 } else { 0 }, Ordering::Release);
+                    futex_wake(state, i32::MAX);
+                    return ok;
+                }
+                Err(2) => return 1,
+                Err(s) => {
+                    futex_wait(state, s, 0xFFFFFFFF);
+                }
+            }
+        }
+    }
+
+    fn InitializeCriticalSectionEx(lpCriticalSection: *mut c_void, _dwSpinCount: u32, _Flags: u32) -> i32 {
+        trace_call!("kernel32!InitializeCriticalSectionEx");
+        InitializeCriticalSection(lpCriticalSection);
+        1
+    }
+
+    fn TryEnterCriticalSection(lpCriticalSection: *mut c_void) -> i32 {
+        trace_call!("kernel32!TryEnterCriticalSection");
+        (libc::pthread_mutex_trylock(lpCriticalSection as *mut libc::pthread_mutex_t) == 0) as i32
+    }
+
+    fn EncodePointer(Ptr: *mut c_void) -> *mut c_void {
+        trace_call!("kernel32!EncodePointer");
+        Ptr
+    }
+
+    fn DecodePointer(Ptr: *mut c_void) -> *mut c_void {
+        trace_call!("kernel32!DecodePointer");
+        Ptr
+    }
+
+    // STARTUPINFOW, with only its size filled in
+    fn GetStartupInfoW(lpStartupInfo: *mut c_void) {
+        trace_call!("kernel32!GetStartupInfoW");
+        std::ptr::write_bytes(lpStartupInfo as *mut u8, 0, 104);
+        *(lpStartupInfo as *mut u32) = 104;
+    }
+
+    fn GetModuleHandleExW(dwFlags: u32, lpModuleName: *const u16, phModule: *mut *mut c_void) -> i32 {
+        trace_call!("kernel32!GetModuleHandleExW", "flags=0x{:x}", dwFlags);
+        const FROM_ADDRESS: u32 = 4;
+        let handle = if dwFlags & FROM_ADDRESS != 0 {
+            crate::module::find_by_address(lpModuleName as usize).map_or(std::ptr::null_mut(), |m| m.base as *mut c_void)
+        } else if lpModuleName.is_null() {
+            super::DLL_MAP_BASE.load(Ordering::Relaxed) as *mut c_void
+        } else {
+            module_handle(&wide_to_string(lpModuleName), false)
+        };
+        *phModule = handle;
+        if handle.is_null() {
+            LAST_ERROR.store(126, Ordering::SeqCst);
+        }
+        (!handle.is_null()) as i32
+    }
+
+    // A loaded DLL's path, as the Linux path it was loaded from
+    fn GetModuleFileNameW(hModule: *mut c_void, lpFilename: *mut u16, nSize: u32) -> u32 {
+        trace_call!("kernel32!GetModuleFileNameW");
+        let module = if hModule.is_null() {
+            crate::module::find_by_handle(super::DLL_MAP_BASE.load(Ordering::Relaxed))
+        } else {
+            crate::module::find_by_handle(hModule as usize)
+        };
+        let Some(module) = module else {
+            LAST_ERROR.store(126, Ordering::SeqCst);
+            return 0;
+        };
+        let path = match &module.dir {
+            Some(dir) => dir.join(&module.name).to_string_lossy().into_owned(),
+            None => module.name.clone(),
+        };
+        copy_wide(&path, lpFilename, nSize)
+    }
+
+    fn GetEnvironmentVariableW(lpName: *const u16, lpBuffer: *mut u16, nSize: u32) -> u32 {
+        let name = wide_to_string(lpName);
+        trace_call!("kernel32!GetEnvironmentVariableW", "name={}", name);
+        match std::env::var(&name) {
+            Ok(value) => copy_wide(&value, lpBuffer, nSize),
+            Err(_) => {
+                LAST_ERROR.store(203, Ordering::SeqCst); // ERROR_ENVVAR_NOT_FOUND
+                0
+            }
+        }
+    }
+
+    fn QueryPerformanceFrequency(lpFrequency: *mut i64) -> i32 {
+        trace_call!("kernel32!QueryPerformanceFrequency");
+        *lpFrequency = 1_000_000_000;
+        1
+    }
+
+    fn GetTickCount64() -> u64 {
+        trace_call!("kernel32!GetTickCount64");
+        let mut ts: libc::timespec = std::mem::zeroed();
+        libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+        (ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000) as u64
+    }
+
+    fn GetCurrentProcessorNumber() -> u32 {
+        trace_call!("kernel32!GetCurrentProcessorNumber");
+        libc::sched_getcpu().max(0) as u32
+    }
+
+    fn SwitchToThread() -> i32 {
+        trace_call!("kernel32!SwitchToThread");
+        libc::sched_yield();
+        1
+    }
+
+    fn FlushProcessWriteBuffers() {
+        trace_call!("kernel32!FlushProcessWriteBuffers");
+        std::sync::atomic::fence(Ordering::SeqCst);
+    }
+
+    fn GetNativeSystemInfo(lpSystemInfo: *mut c_void) {
+        trace_call!("kernel32!GetNativeSystemInfo");
+        GetSystemInfo(lpSystemInfo);
+    }
+
+    fn AreFileApisANSI() -> i32 {
+        trace_call!("kernel32!AreFileApisANSI");
+        1
+    }
+
+    fn SetErrorMode(_uMode: u32) -> u32 {
+        trace_call!("kernel32!SetErrorMode");
+        0
+    }
+
+    fn OutputDebugStringW(_lpOutputString: *const u16) {
+        trace_call!("kernel32!OutputDebugStringW", "{}", wide_to_string(_lpOutputString));
+    }
+
+    fn CreateEventExW(lpEventAttributes: *mut c_void, lpName: *const u16, dwFlags: u32, _dwDesiredAccess: u32) -> *mut c_void {
+        trace_call!("kernel32!CreateEventExW");
+        // CREATE_EVENT_MANUAL_RESET and CREATE_EVENT_INITIAL_SET
+        CreateEventW(lpEventAttributes, (dwFlags & 1 != 0) as i32, (dwFlags & 2 != 0) as i32, lpName)
+    }
+
+    fn WaitForSingleObject(hHandle: *mut c_void, dwMilliseconds: u32) -> u32 {
+        trace_call!("kernel32!WaitForSingleObject");
+        WaitForSingleObjectEx(hHandle, dwMilliseconds, 0)
+    }
+
+    // Vectored handlers only run for faults, which nothing here raises; registering one succeeds
+    fn AddVectoredExceptionHandler(_First: u32, Handler: *mut c_void) -> *mut c_void {
+        trace_call!("kernel32!AddVectoredExceptionHandler");
+        Handler
+    }
+
+    fn RemoveVectoredExceptionHandler(_Handle: *mut c_void) -> u32 {
+        trace_call!("kernel32!RemoveVectoredExceptionHandler");
+        1
+    }
+
+    fn RtlCaptureStackBackTrace(_FramesToSkip: u32, _FramesToCapture: u32, _BackTrace: *mut *mut c_void, BackTraceHash: *mut u32) -> u16 {
+        trace_call!("kernel32!RtlCaptureStackBackTrace");
+        if !BackTraceHash.is_null() {
+            *BackTraceHash = 0;
+        }
+        0
+    }
+}
+
+/// Writes text as a terminated UTF-16 string into a buffer of size characters, as the W functions
+/// do: the length written, or the size needed, terminator included, when it does not fit
+unsafe fn copy_wide(text: &str, buffer: *mut u16, size: u32) -> u32 {
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    if wide.len() + 1 > size as usize || buffer.is_null() {
+        LAST_ERROR.store(122, Ordering::SeqCst); // ERROR_INSUFFICIENT_BUFFER
+        return wide.len() as u32 + 1;
+    }
+    std::ptr::copy_nonoverlapping(wide.as_ptr(), buffer, wide.len());
+    *buffer.add(wide.len()) = 0;
+    wide.len() as u32
 }
