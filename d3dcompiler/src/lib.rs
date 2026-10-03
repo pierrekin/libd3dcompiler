@@ -1499,6 +1499,54 @@ mod linux_loader {
 
             // CRT init
             "_initterm" => imports::msvcrt::_initterm as *const () as usize,
+            "calloc" => imports::msvcrt::calloc as *const () as usize,
+            "_configure_narrow_argv" => {
+                imports::msvcrt::_configure_narrow_argv as *const () as usize
+            }
+            "_initialize_narrow_environment" => {
+                imports::msvcrt::_initialize_narrow_environment as *const () as usize
+            }
+            "_initialize_onexit_table" => {
+                imports::msvcrt::_initialize_onexit_table as *const () as usize
+            }
+            "_register_onexit_function" => {
+                imports::msvcrt::_register_onexit_function as *const () as usize
+            }
+            "_execute_onexit_table" => imports::msvcrt::_execute_onexit_table as *const () as usize,
+            "_crt_atexit" => imports::msvcrt::_crt_atexit as *const () as usize,
+            "_cexit" => imports::msvcrt::_cexit as *const () as usize,
+            "__std_type_info_destroy_list" => {
+                imports::msvcrt::__std_type_info_destroy_list as *const () as usize
+            }
+            "_seh_filter_dll" => imports::msvcrt::_seh_filter_dll as *const () as usize,
+            "_invalid_parameter_noinfo" => {
+                imports::msvcrt::_invalid_parameter_noinfo as *const () as usize
+            }
+            "terminate" => imports::msvcrt::terminate as *const () as usize,
+            "_wtoi" => imports::msvcrt::_wtoi as *const () as usize,
+            "_wsopen_s" => imports::msvcrt::_wsopen_s as *const () as usize,
+            "__stdio_common_vsprintf" => {
+                imports::msvcrt::__stdio_common_vsprintf as *const () as usize
+            }
+            "__stdio_common_vsprintf_s" => {
+                imports::msvcrt::__stdio_common_vsprintf_s as *const () as usize
+            }
+            "__stdio_common_vsnprintf_s" => {
+                imports::msvcrt::__stdio_common_vsnprintf_s as *const () as usize
+            }
+            "__stdio_common_vswprintf" => {
+                imports::msvcrt::__stdio_common_vswprintf as *const () as usize
+            }
+            "__stdio_common_vswprintf_s" => {
+                imports::msvcrt::__stdio_common_vswprintf_s as *const () as usize
+            }
+            "__stdio_common_vsnwprintf_s" => {
+                imports::msvcrt::__stdio_common_vsnwprintf_s as *const () as usize
+            }
+            "__stdio_common_vsscanf" => {
+                imports::msvcrt::__stdio_common_vsscanf as *const () as usize
+            }
+            "_initterm_e" => imports::msvcrt::_initterm_e as *const () as usize,
             "_amsg_exit" => imports::msvcrt::_amsg_exit as *const () as usize,
             "_purecall" => imports::msvcrt::_purecall as *const () as usize,
             "_onexit" => imports::msvcrt::_onexit as *const () as usize,
