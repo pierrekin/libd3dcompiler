@@ -1300,12 +1300,27 @@ mod linux_loader {
     }
 
     // Import resolver - resolves by DLL name and import name, None if no shim exists
-    fn resolve_import(dll: &str, name: &str) -> Option<usize> {
+    pub(crate) fn resolve_import(dll: &str, name: &str) -> Option<usize> {
         // Normalize DLL name (remove .dll extension if present)
         let dll_base = dll.trim_end_matches(".dll");
+        let mut addr = resolve_import_exact(dll_base, name);
+        // The Universal CRT's private exports, which Microsoft's own DLLs import, are the C runtime's
+        // functions with an _o_ prefix
+        if addr == 0
+            && let Some(plain) = name.strip_prefix("_o_")
+        {
+            addr = resolve_import_exact(dll_base, plain);
+        }
+        // kernel32 forwards the Rtl* functions to ntdll
+        if addr == 0 && (dll_base == "kernel32" || dll_base.starts_with("api-ms-win-core-")) {
+            addr = resolve_ntdll(name);
+        }
+        (addr != 0).then_some(addr)
+    }
 
-        // Per-DLL resolvers return 0 for unknown names
-        let addr = match dll_base {
+    // Per-DLL resolvers return 0 for unknown names
+    fn resolve_import_exact(dll_base: &str, name: &str) -> usize {
+        match dll_base {
             "msvcrt"
             | "msvcr100"
             | "msvcr110"
@@ -1351,8 +1366,7 @@ mod linux_loader {
             "ntdll" => resolve_ntdll(name),
             "rpcrt4" => resolve_rpcrt4(name),
             _ => 0,
-        };
-        (addr != 0).then_some(addr)
+        }
     }
 
     fn resolve_msvcrt(name: &str) -> usize {
