@@ -44,12 +44,12 @@ unsafe extern "C" fn qsort_wrapper(a: *const c_void, b: *const c_void) -> i32 {
 import_fn! {
     fn malloc(size: usize) -> *mut c_void {
         trace_call!("msvcrt!malloc", "size={}", size);
-        libc::malloc(size)
+        super::heap::alloc(size, false)
     }
 
     fn free(ptr: *mut c_void) {
         trace_call!("msvcrt!free", "ptr={:p}", ptr);
-        libc::free(ptr)
+        super::heap::free(ptr)
     }
 
     fn op_new(size: usize) -> *mut c_void {
@@ -206,7 +206,12 @@ import_fn! {
 
     fn _strdup(s: *const i8) -> *mut i8 {
         trace_call!("msvcrt!_strdup");
-        libc::strdup(s)
+        let len = libc::strlen(s) + 1;
+        let dst = super::heap::alloc(len, false) as *mut i8;
+        if !dst.is_null() {
+            std::ptr::copy_nonoverlapping(s, dst, len);
+        }
+        dst
     }
 
     fn _stricmp(s1: *const i8, s2: *const i8) -> i32 {
@@ -409,7 +414,7 @@ import_fn! {
             len += 1;
         }
         let size = (len + 1) * 2;
-        let dst = libc::malloc(size) as *mut u16;
+        let dst = super::heap::alloc(size, false) as *mut u16;
         if !dst.is_null() {
             for i in 0..=len {
                 *dst.add(i) = *s.add(i);
@@ -1143,7 +1148,10 @@ unsafe extern "win64" fn sscanf_impl(
 import_fn! {
     fn calloc(count: usize, size: usize) -> *mut c_void {
         trace_call!("ucrt!calloc", "count={}, size={}", count, size);
-        libc::calloc(count, size)
+        match count.checked_mul(size) {
+            Some(total) => super::heap::alloc(total, true),
+            None => std::ptr::null_mut(),
+        }
     }
 
     fn _configure_narrow_argv(_mode: i32) -> i32 {

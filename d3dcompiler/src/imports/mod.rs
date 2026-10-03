@@ -1,4 +1,5 @@
 pub mod advapi32;
+pub mod heap;
 pub mod kernel32;
 pub mod msvcrt;
 pub mod ntdll;
