@@ -1227,7 +1227,18 @@ unsafe extern "win64" fn sprintf_s_impl(
     argptr: *const u64,
 ) -> i32 {
     trace_call!("msvcrt!sprintf_s");
-    super::printf::vsnprintf_core(buffer, size, format, argptr)
+    // Text that does not fit is an invalid parameter: the buffer is emptied and -1 returned
+    let text = super::printf::format(format, argptr);
+    if buffer.is_null() || size == 0 {
+        return -1;
+    }
+    if text.len() >= size {
+        *buffer = 0;
+        return -1;
+    }
+    std::ptr::copy_nonoverlapping(text.as_ptr(), buffer as *mut u8, text.len());
+    *buffer.add(text.len()) = 0;
+    text.len() as i32
 }
 
 #[unsafe(naked)]
