@@ -1206,6 +1206,7 @@ mod linux_loader {
                 resolve_advapi32(name)
             }
             "ntdll" => resolve_ntdll(name),
+            "ole32" | "oleaut32" => resolve_ole32(name),
             "rpcrt4" => resolve_rpcrt4(name),
             _ => 0,
         }
@@ -1410,6 +1411,107 @@ mod linux_loader {
             "_wfullpath" => imports::msvcrt::_wfullpath as *const () as usize,
             "_wmakepath_s" => imports::msvcrt::_wmakepath_s as *const () as usize,
             "_wsplitpath_s" => imports::msvcrt::_wsplitpath_s as *const () as usize,
+            "acosf" => imports::msvcrt::acosf as *const () as usize,
+            "asinf" => imports::msvcrt::asinf as *const () as usize,
+            "atanf" => imports::msvcrt::atanf as *const () as usize,
+            "atan2f" => imports::msvcrt::atan2f as *const () as usize,
+            "ceilf" => imports::msvcrt::ceilf as *const () as usize,
+            "copysign" => imports::msvcrt::copysign as *const () as usize,
+            "cosf" => imports::msvcrt::cosf as *const () as usize,
+            "coshf" => imports::msvcrt::coshf as *const () as usize,
+            "exp2" => imports::msvcrt::exp2 as *const () as usize,
+            "exp2f" => imports::msvcrt::exp2f as *const () as usize,
+            "expf" => imports::msvcrt::expf as *const () as usize,
+            "fabs" => imports::msvcrt::fabs as *const () as usize,
+            "frexp" => imports::msvcrt::frexp_ as *const () as usize,
+            "ldexp" => imports::msvcrt::ldexp_ as *const () as usize,
+            "log10" => imports::msvcrt::log10 as *const () as usize,
+            "log10f" => imports::msvcrt::log10f as *const () as usize,
+            "log2" => imports::msvcrt::log2 as *const () as usize,
+            "log2f" => imports::msvcrt::log2f as *const () as usize,
+            "logf" => imports::msvcrt::logf as *const () as usize,
+            "nearbyint" => imports::msvcrt::nearbyint as *const () as usize,
+            "nearbyintf" => imports::msvcrt::nearbyintf as *const () as usize,
+            "powf" => imports::msvcrt::powf as *const () as usize,
+            "round" => imports::msvcrt::round as *const () as usize,
+            "roundf" => imports::msvcrt::roundf as *const () as usize,
+            "sinf" => imports::msvcrt::sinf as *const () as usize,
+            "sinhf" => imports::msvcrt::sinhf as *const () as usize,
+            "sqrtf" => imports::msvcrt::sqrtf as *const () as usize,
+            "tanf" => imports::msvcrt::tanf as *const () as usize,
+            "tanhf" => imports::msvcrt::tanhf as *const () as usize,
+            "trunc" => imports::msvcrt::trunc as *const () as usize,
+            "truncf" => imports::msvcrt::truncf as *const () as usize,
+            "fegetround" => imports::msvcrt::fegetround as *const () as usize,
+            "fesetround" => imports::msvcrt::fesetround as *const () as usize,
+            "_controlfp_s" => imports::msvcrt::_controlfp_s as *const () as usize,
+            "islower" => imports::msvcrt::islower as *const () as usize,
+            "isupper" => imports::msvcrt::isupper as *const () as usize,
+            "isprint" => imports::msvcrt::isprint as *const () as usize,
+            "iswalnum" => imports::msvcrt::iswalnum as *const () as usize,
+            "iswspace" => imports::msvcrt::iswspace as *const () as usize,
+            "iswxdigit" => imports::msvcrt::iswxdigit as *const () as usize,
+            "strcpy" => imports::msvcrt::strcpy as *const () as usize,
+            "strncpy" => imports::msvcrt::strncpy as *const () as usize,
+            "strcspn" => imports::msvcrt::strcspn as *const () as usize,
+            "strpbrk" => imports::msvcrt::strpbrk as *const () as usize,
+            "__strncnt" => imports::msvcrt::__strncnt as *const () as usize,
+            "wcslen" => imports::msvcrt::wcslen as *const () as usize,
+            "wcsnlen" => imports::msvcrt::wcsnlen as *const () as usize,
+            "wcscmp" => imports::msvcrt::wcscmp as *const () as usize,
+            "atol" => imports::msvcrt::atol as *const () as usize,
+            "strtol" => imports::msvcrt::strtol as *const () as usize,
+            "strtoll" => imports::msvcrt::strtoll as *const () as usize,
+            "strtoull" => imports::msvcrt::strtoull as *const () as usize,
+            "strtof" => imports::msvcrt::strtof as *const () as usize,
+            "btowc" => imports::msvcrt::btowc as *const () as usize,
+            "realloc" => imports::msvcrt::realloc as *const () as usize,
+            "_recalloc" => imports::msvcrt::_recalloc as *const () as usize,
+            "rand" => imports::msvcrt::rand as *const () as usize,
+            "rand_s" => imports::msvcrt::rand_s as *const () as usize,
+            "_wgetcwd" => imports::msvcrt::_wgetcwd as *const () as usize,
+            "abort" => imports::msvcrt::abort as *const () as usize,
+            "exit" => imports::msvcrt::exit as *const () as usize,
+            "_invalid_parameter_noinfo_noreturn" => {
+                imports::msvcrt::_invalid_parameter_noinfo_noreturn as *const () as usize
+            }
+            "_invoke_watson" => imports::msvcrt::_invoke_watson as *const () as usize,
+            "_resetstkoflw" => imports::msvcrt::_resetstkoflw as *const () as usize,
+            "_set_new_handler" => imports::msvcrt::_set_new_handler as *const () as usize,
+            "_crt_at_quick_exit" => imports::msvcrt::_crt_at_quick_exit as *const () as usize,
+            "___lc_codepage_func" => imports::msvcrt::___lc_codepage_func as *const () as usize,
+            "___lc_collate_cp_func" => imports::msvcrt::___lc_collate_cp_func as *const () as usize,
+            "___lc_locale_name_func" => {
+                imports::msvcrt::___lc_locale_name_func as *const () as usize
+            }
+            "___mb_cur_max_func" => imports::msvcrt::___mb_cur_max_func as *const () as usize,
+            "__pctype_func" => imports::msvcrt::__pctype_func as *const () as usize,
+            "_lock_locales" => imports::msvcrt::_lock_locales as *const () as usize,
+            "_unlock_locales" => imports::msvcrt::_unlock_locales as *const () as usize,
+            "localeconv" => imports::msvcrt::localeconv as *const () as usize,
+            "__acrt_iob_func" => imports::msvcrt::__acrt_iob_func as *const () as usize,
+            "fflush" => imports::msvcrt::fflush as *const () as usize,
+            "fgetc" => imports::msvcrt::fgetc as *const () as usize,
+            "fputc" => imports::msvcrt::fputc as *const () as usize,
+            "fputs" => imports::msvcrt::fputs as *const () as usize,
+            "puts" => imports::msvcrt::puts as *const () as usize,
+            "ungetc" => imports::msvcrt::ungetc as *const () as usize,
+            "fwrite" => imports::msvcrt::fwrite as *const () as usize,
+            "setvbuf" => imports::msvcrt::setvbuf as *const () as usize,
+            "_fseeki64" => imports::msvcrt::_fseeki64 as *const () as usize,
+            "fgetpos" => imports::msvcrt::fgetpos as *const () as usize,
+            "fsetpos" => imports::msvcrt::fsetpos as *const () as usize,
+            "_lock_file" => imports::msvcrt::_lock_file as *const () as usize,
+            "_unlock_file" => imports::msvcrt::_unlock_file as *const () as usize,
+            "_fsopen" => imports::msvcrt::_fsopen as *const () as usize,
+            "_setmode" => imports::msvcrt::_setmode as *const () as usize,
+            "_lseek" => imports::msvcrt::_lseek as *const () as usize,
+            "__stdio_common_vfprintf" => {
+                imports::msvcrt::__stdio_common_vfprintf as *const () as usize
+            }
+            "_get_stream_buffer_pointers" => {
+                imports::msvcrt::_get_stream_buffer_pointers as *const () as usize
+            }
             _ => 0,
         }
     }
@@ -1526,6 +1628,79 @@ mod linux_loader {
             "IsProcessorFeaturePresent" => {
                 imports::kernel32::IsProcessorFeaturePresent as *const () as usize
             }
+            "HeapReAlloc" => imports::kernel32::HeapReAlloc as *const () as usize,
+            "HeapSize" => imports::kernel32::HeapSize as *const () as usize,
+            "InitializeSRWLock" => imports::kernel32::InitializeSRWLock as *const () as usize,
+            "AcquireSRWLockExclusive" => {
+                imports::kernel32::AcquireSRWLockExclusive as *const () as usize
+            }
+            "AcquireSRWLockShared" => imports::kernel32::AcquireSRWLockShared as *const () as usize,
+            "TryAcquireSRWLockExclusive" => {
+                imports::kernel32::TryAcquireSRWLockExclusive as *const () as usize
+            }
+            "TryAcquireSRWLockShared" => {
+                imports::kernel32::TryAcquireSRWLockShared as *const () as usize
+            }
+            "ReleaseSRWLockExclusive" => {
+                imports::kernel32::ReleaseSRWLockExclusive as *const () as usize
+            }
+            "ReleaseSRWLockShared" => imports::kernel32::ReleaseSRWLockShared as *const () as usize,
+            "InitializeConditionVariable" => {
+                imports::kernel32::InitializeConditionVariable as *const () as usize
+            }
+            "SleepConditionVariableSRW" => {
+                imports::kernel32::SleepConditionVariableSRW as *const () as usize
+            }
+            "SleepConditionVariableCS" => {
+                imports::kernel32::SleepConditionVariableCS as *const () as usize
+            }
+            "WakeConditionVariable" => {
+                imports::kernel32::WakeConditionVariable as *const () as usize
+            }
+            "WakeAllConditionVariable" => {
+                imports::kernel32::WakeAllConditionVariable as *const () as usize
+            }
+            "InitOnceExecuteOnce" => imports::kernel32::InitOnceExecuteOnce as *const () as usize,
+            "InitializeCriticalSectionEx" => {
+                imports::kernel32::InitializeCriticalSectionEx as *const () as usize
+            }
+            "TryEnterCriticalSection" => {
+                imports::kernel32::TryEnterCriticalSection as *const () as usize
+            }
+            "EncodePointer" => imports::kernel32::EncodePointer as *const () as usize,
+            "DecodePointer" => imports::kernel32::DecodePointer as *const () as usize,
+            "GetStartupInfoW" => imports::kernel32::GetStartupInfoW as *const () as usize,
+            "GetModuleHandleExW" => imports::kernel32::GetModuleHandleExW as *const () as usize,
+            "GetModuleFileNameW" => imports::kernel32::GetModuleFileNameW as *const () as usize,
+            "GetEnvironmentVariableW" => {
+                imports::kernel32::GetEnvironmentVariableW as *const () as usize
+            }
+            "QueryPerformanceFrequency" => {
+                imports::kernel32::QueryPerformanceFrequency as *const () as usize
+            }
+            "GetTickCount64" => imports::kernel32::GetTickCount64 as *const () as usize,
+            "GetCurrentProcessorNumber" => {
+                imports::kernel32::GetCurrentProcessorNumber as *const () as usize
+            }
+            "SwitchToThread" => imports::kernel32::SwitchToThread as *const () as usize,
+            "FlushProcessWriteBuffers" => {
+                imports::kernel32::FlushProcessWriteBuffers as *const () as usize
+            }
+            "GetNativeSystemInfo" => imports::kernel32::GetNativeSystemInfo as *const () as usize,
+            "AreFileApisANSI" => imports::kernel32::AreFileApisANSI as *const () as usize,
+            "SetErrorMode" => imports::kernel32::SetErrorMode as *const () as usize,
+            "OutputDebugStringW" => imports::kernel32::OutputDebugStringW as *const () as usize,
+            "CreateEventExW" => imports::kernel32::CreateEventExW as *const () as usize,
+            "WaitForSingleObject" => imports::kernel32::WaitForSingleObject as *const () as usize,
+            "AddVectoredExceptionHandler" => {
+                imports::kernel32::AddVectoredExceptionHandler as *const () as usize
+            }
+            "RemoveVectoredExceptionHandler" => {
+                imports::kernel32::RemoveVectoredExceptionHandler as *const () as usize
+            }
+            "RtlCaptureStackBackTrace" => {
+                imports::kernel32::RtlCaptureStackBackTrace as *const () as usize
+            }
 
             "RtlCaptureContext" | "RtlLookupFunctionEntry" | "RtlVirtualUnwind" => {
                 resolve_ntdll(name)
@@ -1551,6 +1726,9 @@ mod linux_loader {
             "CryptDestroyHash" => imports::advapi32::CryptDestroyHash as *const () as usize,
             "CryptHashData" => imports::advapi32::CryptHashData as *const () as usize,
             "CryptGetHashParam" => imports::advapi32::CryptGetHashParam as *const () as usize,
+            "EventRegister" => imports::advapi32::EventRegister as *const () as usize,
+            "EventUnregister" => imports::advapi32::EventUnregister as *const () as usize,
+            "EventWriteTransfer" => imports::advapi32::EventWriteTransfer as *const () as usize,
             _ => 0,
         }
     }
@@ -1566,6 +1744,24 @@ mod linux_loader {
             "RaiseException" => imports::ntdll::RaiseException as *const () as usize,
             "RtlPcToFileHeader" => imports::ntdll::RtlPcToFileHeader as *const () as usize,
             "RtlUnwind" => imports::ntdll::RtlUnwind as *const () as usize,
+            _ => 0,
+        }
+    }
+
+    fn resolve_ole32(name: &str) -> usize {
+        match name {
+            "CoGetMalloc" => imports::ole32::CoGetMalloc as *const () as usize,
+            "CoTaskMemAlloc" => imports::ole32::CoTaskMemAlloc as *const () as usize,
+            "CoTaskMemRealloc" => imports::ole32::CoTaskMemRealloc as *const () as usize,
+            "CoTaskMemFree" => imports::ole32::CoTaskMemFree as *const () as usize,
+            "SysAllocString" => imports::ole32::SysAllocString as *const () as usize,
+            "SysAllocStringLen" => imports::ole32::SysAllocStringLen as *const () as usize,
+            "SysAllocStringByteLen" => imports::ole32::SysAllocStringByteLen as *const () as usize,
+            "SysFreeString" => imports::ole32::SysFreeString as *const () as usize,
+            "SysStringLen" => imports::ole32::SysStringLen as *const () as usize,
+            "SysStringByteLen" => imports::ole32::SysStringByteLen as *const () as usize,
+            "SetErrorInfo" => imports::ole32::SetErrorInfo as *const () as usize,
+            "GetErrorInfo" => imports::ole32::GetErrorInfo as *const () as usize,
             _ => 0,
         }
     }

@@ -190,3 +190,22 @@ import_fn! {
         }
     }
 }
+
+// Event tracing: providers register and write, and nothing listens
+import_fn! {
+    fn EventRegister(_ProviderId: *const c_void, _EnableCallback: *mut c_void, _CallbackContext: *mut c_void, RegHandle: *mut u64) -> u32 {
+        trace_call!("advapi32!EventRegister");
+        *RegHandle = 1;
+        0
+    }
+
+    fn EventUnregister(_RegHandle: u64) -> u32 {
+        trace_call!("advapi32!EventUnregister");
+        0
+    }
+
+    fn EventWriteTransfer(_RegHandle: u64, _EventDescriptor: *const c_void, _ActivityId: *const c_void, _RelatedActivityId: *const c_void, _UserDataCount: u32, _UserData: *const c_void) -> u32 {
+        trace_call!("advapi32!EventWriteTransfer");
+        0
+    }
+}
