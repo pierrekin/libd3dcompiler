@@ -733,18 +733,22 @@ import_fn! {
         }
     }
 
+    // _FPCLASS_SNAN 0x1, QNAN 0x2, NINF 0x4, NN 0x8, ND 0x10, NZ 0x20, PZ 0x40, PD 0x80, PN 0x100,
+    // PINF 0x200: sign, zero and denormal all count
     fn _fpclass(x: f64) -> i32 {
         trace_call!("msvcrt!_fpclass");
+        let negative = x.is_sign_negative();
         if x.is_nan() {
-            0x0002
+            // a quiet NaN has the top bit of the mantissa set
+            if x.to_bits() & (1 << 51) != 0 { 0x0002 } else { 0x0001 }
         } else if x.is_infinite() {
-            if x > 0.0 {
-                0x0200
-            } else {
-                0x0004
-            }
+            if negative { 0x0004 } else { 0x0200 }
         } else if x == 0.0 {
-            0x0020
+            if negative { 0x0020 } else { 0x0040 }
+        } else if x.is_subnormal() {
+            if negative { 0x0010 } else { 0x0080 }
+        } else if negative {
+            0x0008
         } else {
             0x0100
         }
