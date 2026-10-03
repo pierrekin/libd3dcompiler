@@ -13,6 +13,7 @@
 #![recursion_limit = "256"]
 
 mod imports;
+mod module;
 
 macro_rules! debug_log {
     ($($arg:tt)*) => {
@@ -854,13 +855,6 @@ pub unsafe extern "C" fn D3DSetBlobPart(
 #[cfg(unix)]
 mod linux_loader {
     use super::*;
-    use object::pe::{
-        IMAGE_REL_BASED_DIR64, IMAGE_SCN_MEM_EXECUTE, IMAGE_SCN_MEM_READ, IMAGE_SCN_MEM_WRITE,
-        ImageNtHeaders64,
-    };
-    use object::read::pe::{ImageOptionalHeader, ImageThunkData, PeFile64};
-    use object::{LittleEndian as LE, Object, ObjectSection};
-    use std::collections::HashMap;
 
     // Thread Information Block for Windows ABI compatibility
     // Windows x64 TEB layout (relevant fields):
@@ -912,26 +906,45 @@ mod linux_loader {
         static TIB_INITIALIZED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
-    // The DLL's implicit TLS template (__declspec(thread) variables, and the epoch MSVC's guarded
-    // statics compare against): its address in the mapped image, its initialised size and the zeros
-    // after it. Each thread gets its own copy, in slot 0 of the TLS array at TEB+0x58, since this is
-    // the only module with TLS.
-    static TLS_TEMPLATE: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    // Each module's implicit TLS template (__declspec(thread) variables, and the epoch MSVC's
+    // guarded statics compare against), by TLS index: its address in the mapped image, its
+    // initialised size and the zeros after it. Each thread gets its own copy of each, in the TLS
+    // array at TEB+0x58.
+    static TLS_TEMPLATES: std::sync::Mutex<Vec<(usize, usize, usize)>> =
+        std::sync::Mutex::new(Vec::new());
+    const TLS_SLOTS: usize = 64;
+
+    /// Registers a module's TLS template, gives this thread its copy, and returns its index
+    pub(crate) fn add_tls_template(start: usize, len: usize, zero_fill: usize) -> u32 {
+        let index = {
+            let mut templates = TLS_TEMPLATES.lock().unwrap();
+            assert!(templates.len() < TLS_SLOTS, "too many modules with TLS");
+            templates.push((start, len, zero_fill));
+            templates.len() - 1
+        };
+        unsafe { setup_thread_tls() };
+        index as u32
+    }
 
     unsafe fn setup_thread_tls() {
-        let Some(&(start, len, zero_fill)) = TLS_TEMPLATE.get() else {
+        let templates = TLS_TEMPLATES.lock().unwrap();
+        if templates.is_empty() {
             return;
-        };
+        }
         TIB.with(|tib| {
             let tib_ptr = tib.get();
-            if (*tib_ptr).tls_pointer != 0 {
-                return;
+            if (*tib_ptr).tls_pointer == 0 {
+                (*tib_ptr).tls_pointer =
+                    libc::calloc(TLS_SLOTS, std::mem::size_of::<usize>()) as usize;
             }
-            let block = libc::calloc(1, (len + zero_fill).max(1)) as *mut u8;
-            std::ptr::copy_nonoverlapping(start as *const u8, block, len);
-            let slots = libc::calloc(64, std::mem::size_of::<usize>()) as *mut usize;
-            *slots = block as usize;
-            (*tib_ptr).tls_pointer = slots as usize;
+            let slots = (*tib_ptr).tls_pointer as *mut usize;
+            for (i, &(start, len, zero_fill)) in templates.iter().enumerate() {
+                if *slots.add(i) == 0 {
+                    let block = libc::calloc(1, (len + zero_fill).max(1)) as *mut u8;
+                    std::ptr::copy_nonoverlapping(start as *const u8, block, len);
+                    *slots.add(i) = block as usize;
+                }
+            }
         });
     }
 
@@ -1090,257 +1103,25 @@ mod linux_loader {
         #[cfg(not(feature = "embed-dll"))]
         let dll: &[u8] = &dll_vec;
 
-        let obj_file =
-            PeFile64::parse(dll).map_err(|e| D3DCompilerError::ParseError(e.to_string()))?;
+        let module =
+            crate::module::load(DLL_NAME, dll, None).map_err(D3DCompilerError::LoadError)?;
 
-        let size = obj_file.nt_headers().optional_header.size_of_image() as usize;
-        let header_size = obj_file.nt_headers().optional_header.size_of_headers() as usize;
-        let image_base = obj_file.relative_address_base() as usize;
+        // Store globals for import tracing
+        imports::DLL_MAP_BASE.store(module.base, std::sync::atomic::Ordering::Relaxed);
+        imports::DLL_MAP_SIZE.store(module.size, std::sync::atomic::Ordering::Relaxed);
+        imports::DLL_IMAGE_BASE.store(module.image_base, std::sync::atomic::Ordering::Relaxed);
 
-        // Allocate memory for the image
-        let mmap = unsafe {
-            let ptr = libc::mmap(
-                std::ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                -1,
-                0,
-            );
-            if ptr == libc::MAP_FAILED {
-                return Err(D3DCompilerError::LoadError("mmap failed".into()));
-            }
-            std::slice::from_raw_parts_mut(ptr as *mut u8, size)
-        };
-
-        let map_base = mmap.as_ptr();
-
-        // Store globals for crash handler and import tracing
-        imports::DLL_MAP_BASE.store(map_base as usize, std::sync::atomic::Ordering::Relaxed);
-        imports::DLL_MAP_SIZE.store(size, std::sync::atomic::Ordering::Relaxed);
-        imports::DLL_IMAGE_BASE.store(image_base, std::sync::atomic::Ordering::Relaxed);
-
-        // // Install crash handler
-        // install_crash_handler();
-        // eprintln!("[d3dcompiler] Crash handler installed");
-        // eprintln!(
-        //     "[d3dcompiler] DLL mapped at 0x{:x}, size 0x{:x}, image base 0x{:x}",
-        //     map_base as usize, size, image_base
-        // );
-
-        // Copy header
-        mmap[0..header_size].copy_from_slice(&dll[0..header_size]);
-        unsafe {
-            libc::mprotect(
-                mmap.as_mut_ptr() as *mut c_void,
-                header_size,
-                libc::PROT_READ,
-            );
-        }
-
-        // Copy sections
-        for section in obj_file.sections() {
-            let address = section.address() as usize;
-            if let Ok(data) = section.data() {
-                let offset = address - image_base;
-                if offset + data.len() <= mmap.len() {
-                    mmap[offset..offset + data.len()].copy_from_slice(data);
-                }
-            }
-        }
-
-        // Apply relocations
-        let sections = obj_file.section_table();
-        if let Ok(Some(mut blocks)) = obj_file
-            .data_directories()
-            .relocation_blocks(dll, &sections)
-        {
-            while let Ok(Some(block)) = blocks.next() {
-                let block_address = block.virtual_address();
-                let block_data = sections.pe_data_at(dll, block_address).map(object::Bytes);
-                for reloc in block {
-                    let offset = (reloc.virtual_address - block_address) as usize;
-                    if reloc.typ == IMAGE_REL_BASED_DIR64
-                        && let Some(addend) = block_data
-                            .and_then(|data| data.read_at::<object::U64Bytes<LE>>(offset).ok())
-                            .map(|addend| addend.get(LE))
-                    {
-                        let target = reloc.virtual_address as usize;
-                        if target + 8 <= mmap.len() {
-                            let new_addr = addend - image_base as u64 + map_base as u64;
-                            mmap[target..target + 8].copy_from_slice(&new_addr.to_le_bytes());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fix up imports
-        let mut unresolved = Vec::new();
-        if let Ok(Some(import_table)) = obj_file.import_table()
-            && let Ok(mut import_descs) = import_table.descriptors()
-        {
-            while let Ok(Some(import_desc)) = import_descs.next() {
-                // Get DLL name for this import descriptor
-                let dll_name = import_table
-                    .name(import_desc.name.get(LE))
-                    .ok()
-                    .map(|n| String::from_utf8_lossy(n).to_lowercase())
-                    .unwrap_or_default();
-
-                if let Ok(mut thunks) =
-                    import_table.thunks(import_desc.original_first_thunk.get(LE))
-                {
-                    let mut address = import_desc.first_thunk.get(LE) as usize;
-                    while let Ok(Some(thunk)) = thunks.next::<ImageNtHeaders64>() {
-                        if let Ok((_hint, name)) = import_table.hint_name(thunk.address()) {
-                            let name = String::from_utf8_lossy(name).to_string();
-                            let Some(fn_addr) = resolve_import(&dll_name, &name) else {
-                                unresolved.push(format!("{dll_name}!{name}"));
-                                address += 8;
-                                continue;
-                            };
-                            if address + 8 <= mmap.len() {
-                                mmap[address..address + 8].copy_from_slice(&fn_addr.to_le_bytes());
-                            }
-                        }
-                        address += 8;
-                    }
-                }
-            }
-        }
-        if !unresolved.is_empty() {
-            panic!(
-                "d3dcompiler_47.dll has {} unimplemented imports: {}",
-                unresolved.len(),
-                unresolved.join(", ")
-            );
-        }
-
-        // Build export table
-        let mut exports = HashMap::new();
-        if let Ok(export_list) = obj_file.exports() {
-            for export in export_list {
-                let name = String::from_utf8_lossy(export.name());
-                let address = export.address() - image_base as u64 + map_base as u64;
-                exports.insert(name.to_string(), address as *const c_void);
-            }
-        }
-
-        // Fix section permissions
-        for section in obj_file.sections() {
-            let address = section.address() as usize;
-            if let Ok(data) = section.data() {
-                let size = data.len();
-                let mut permissions = 0;
-
-                let flags = match section.flags() {
-                    object::SectionFlags::Coff { characteristics } => characteristics,
-                    _ => continue,
-                };
-
-                if flags & IMAGE_SCN_MEM_READ != 0 {
-                    permissions |= libc::PROT_READ;
-                }
-                if flags & IMAGE_SCN_MEM_WRITE != 0 {
-                    permissions |= libc::PROT_WRITE;
-                }
-                if flags & IMAGE_SCN_MEM_EXECUTE != 0 {
-                    permissions |= libc::PROT_EXEC;
-                }
-
-                unsafe {
-                    libc::mprotect(
-                        mmap.as_mut_ptr().add(address - image_base) as *mut c_void,
-                        size,
-                        permissions,
-                    );
-                }
-            }
-        }
-
-        // eprintln!("[d3dcompiler] Found {} exports", exports.len());
-        // for (name, addr) in &exports {
-        //     eprintln!("[d3dcompiler]   {} @ {:p}", name, *addr);
-        // }
-
-        // Get function pointers from exports
         let get_fn = |name: &str| -> Result<*const c_void> {
-            exports
-                .get(name)
-                .copied()
+            module
+                .export(name)
+                .map(|a| a as *const c_void)
                 .ok_or_else(|| D3DCompilerError::FunctionNotFound(name.into()))
         };
 
-        // Set up TIB before calling into DLL
-        unsafe {
-            setup_tib();
-        }
-
-        // Implicit TLS: this module's index is 0, and its template is copied for every thread
-        if let Some(dir) = obj_file
-            .data_directories()
-            .get(object::pe::IMAGE_DIRECTORY_ENTRY_TLS)
-            .filter(|d| d.virtual_address.get(LE) != 0)
-        {
-            unsafe {
-                // the directory's addresses are absolute and were relocated with the image
-                let tls = map_base.add(dir.virtual_address.get(LE) as usize) as *const u64;
-                let (start, end, index, callbacks) = (*tls, *tls.add(1), *tls.add(2), *tls.add(3));
-                let zero_fill = *(tls.add(4) as *const u32) as usize;
-                *(index as *mut u32) = 0;
-                let _ = TLS_TEMPLATE.set((start as usize, (end - start) as usize, zero_fill));
-                setup_thread_tls();
-                if callbacks != 0 {
-                    type TlsCallback = unsafe extern "win64" fn(*mut c_void, u32, *mut c_void);
-                    let mut cb = callbacks as *const usize;
-                    while *cb != 0 {
-                        let f = std::mem::transmute::<usize, TlsCallback>(*cb);
-                        f(map_base as *mut c_void, 1, std::ptr::null_mut());
-                        cb = cb.add(1);
-                    }
-                }
-            }
-        }
-
-        // Call DllMain via PE entry point (DLL_PROCESS_ATTACH = 1)
-        let entry_rva = obj_file
-            .nt_headers()
-            .optional_header
-            .address_of_entry_point();
-        if entry_rva != 0 {
-            let entry_addr = map_base as usize + entry_rva as usize;
-            // eprintln!(
-            //     "[d3dcompiler] Calling DllMain at entry point 0x{:x} (RVA 0x{:x})...",
-            //     entry_addr, entry_rva
-            // );
-
-            // Call with win64 ABI: DllMain(hModule, DLL_PROCESS_ATTACH, lpReserved)
-            let _result = unsafe {
-                type DllMain = unsafe extern "win64" fn(
-                    hinst: *const (),
-                    fdw_reason: u32,
-                    lpv_reserved: *mut (),
-                ) -> bool;
-
-                let dll_main = std::mem::transmute::<usize, DllMain>(entry_addr);
-                dll_main(
-                    map_base.cast(),
-                    1,                    // DLL_PROCESS_ATTACH
-                    std::ptr::null_mut(), // NULL
-                )
-            };
-            // eprintln!("[d3dcompiler] DllMain returned: {}", result);
-        } else {
-            // eprintln!("[d3dcompiler] No entry point found (this is unusual for a DLL)");
-        }
-
-        // eprintln!("[d3dcompiler] Resolving D3D exports...");
-
         unsafe {
             let state = D3DCompilerState {
-                _mmap: mmap.as_mut_ptr(),
-                _mmap_size: size,
+                _mmap: module.base as *mut u8,
+                _mmap_size: module.size,
                 d3d_compile: std::mem::transmute(get_fn("D3DCompile")?),
                 d3d_compile2: std::mem::transmute(get_fn("D3DCompile2")?),
                 d3d_compile_from_file: std::mem::transmute(get_fn("D3DCompileFromFile")?),
@@ -1352,13 +1133,16 @@ mod linux_loader {
                 d3d_get_blob_part: std::mem::transmute(get_fn("D3DGetBlobPart")?),
                 d3d_set_blob_part: std::mem::transmute(get_fn("D3DSetBlobPart")?),
             };
-            // eprintln!("[d3dcompiler] DLL loaded successfully!");
             Ok(state)
         }
     }
 
     // Import resolver - resolves by DLL name and import name, None if no shim exists
     pub(crate) fn resolve_import(dll: &str, name: &str) -> Option<usize> {
+        if let Some(module) = crate::module::find_or_load(dll) {
+            return module.export(name);
+        }
+        let dll = dll.to_lowercase();
         // Normalize DLL name (remove .dll extension if present)
         let dll_base = dll.trim_end_matches(".dll");
         let mut addr = resolve_import_exact(dll_base, name);
@@ -1716,6 +1500,8 @@ mod linux_loader {
             }
             "FreeLibrary" => imports::kernel32::FreeLibrary as *const () as usize,
             "LoadLibraryExW" => imports::kernel32::LoadLibraryExW as *const () as usize,
+            "LoadLibraryW" => imports::kernel32::LoadLibraryW as *const () as usize,
+            "LoadLibraryA" => imports::kernel32::LoadLibraryA as *const () as usize,
             "GetProcAddress" => imports::kernel32::GetProcAddress as *const () as usize,
             "GetModuleFileNameA" => imports::kernel32::GetModuleFileNameA as *const () as usize,
             "GetEnvironmentVariableA" => {
