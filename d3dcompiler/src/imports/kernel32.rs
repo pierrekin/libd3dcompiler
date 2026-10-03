@@ -14,6 +14,13 @@ fn heap_table() -> &'static Mutex<HashMap<u32, Vec<usize>>> {
     HEAP_ALLOCS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 static VIRT_REGIONS: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+// The size each HeapAlloc block was asked for, which HeapSize and HeapReAlloc need
+static HEAP_SIZES: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+
+fn heap_sizes() -> &'static Mutex<HashMap<usize, usize>> {
+    HEAP_SIZES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn virt_table() -> &'static Mutex<HashMap<usize, usize>> {
     VIRT_REGIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -332,7 +339,9 @@ import_fn! {
         trace_call!("kernel32!HeapDestroy", "hHeap={:p}", hHeap);
         let removed = heap_table().lock().unwrap().remove(&(hHeap as u32));
         if let Some(ptrs) = removed {
+            let mut sizes = heap_sizes().lock().unwrap();
             for p in ptrs {
+                sizes.remove(&p);
                 libc::free(p as *mut c_void);
             }
         }
@@ -345,11 +354,12 @@ import_fn! {
         dwBytes: usize,
     ) -> *mut c_void {
         trace_call!("kernel32!HeapAlloc", "size={}", dwBytes);
-        let ptr = libc::malloc(dwBytes);
+        let ptr = libc::malloc(dwBytes.max(1));
         if !ptr.is_null() {
             if dwFlags & 0x08 != 0 {
                 libc::memset(ptr, 0, dwBytes);
             }
+            heap_sizes().lock().unwrap().insert(ptr as usize, dwBytes);
             heap_table()
                 .lock()
                 .unwrap()
@@ -379,15 +389,28 @@ import_fn! {
                     v.swap_remove(pos);
                 }
         }
+        // Windows keeps the contents and zeroes only the bytes a grown block gains; with
+        // HEAP_REALLOC_IN_PLACE_ONLY (0x10) it fails rather than move the block
+        let old_size = if lpMem.is_null() { 0 } else { heap_sizes().lock().unwrap().get(&(lpMem as usize)).copied().unwrap_or(0) };
+        if dwFlags & 0x10 != 0 && !lpMem.is_null() && dwBytes > libc::malloc_usable_size(lpMem) {
+            heap_table().lock().unwrap().entry(hHeap as u32).or_default().push(lpMem as usize);
+            return std::ptr::null_mut();
+        }
         let new_ptr = if lpMem.is_null() {
-            libc::malloc(dwBytes)
+            libc::malloc(dwBytes.max(1))
         } else {
-            libc::realloc(lpMem, dwBytes)
+            libc::realloc(lpMem, dwBytes.max(1))
         };
         if !new_ptr.is_null() {
-            if dwFlags & 0x08 != 0 {
-                libc::memset(new_ptr, 0, dwBytes);
+            if dwFlags & 0x08 != 0 && dwBytes > old_size {
+                libc::memset((new_ptr as *mut u8).add(old_size) as *mut c_void, 0, dwBytes - old_size);
             }
+            let mut sizes = heap_sizes().lock().unwrap();
+            if !lpMem.is_null() {
+                sizes.remove(&(lpMem as usize));
+            }
+            sizes.insert(new_ptr as usize, dwBytes);
+            drop(sizes);
             heap_table()
                 .lock()
                 .unwrap()
@@ -406,14 +429,16 @@ import_fn! {
                 && let Some(pos) = v.iter().rposition(|&p| p == lpMem as usize) {
                     v.swap_remove(pos);
                 }
+            heap_sizes().lock().unwrap().remove(&(lpMem as usize));
             libc::free(lpMem);
         }
         1
     }
 
-    fn HeapSize(_hHeap: *mut c_void, _dwFlags: u32, _lpMem: *const c_void) -> usize {
+    // The size the block was asked for, as Windows reports it; (SIZE_T)-1 for a block it does not know
+    fn HeapSize(_hHeap: *mut c_void, _dwFlags: u32, lpMem: *const c_void) -> usize {
         trace_call!("kernel32!HeapSize");
-        usize::MAX
+        heap_sizes().lock().unwrap().get(&(lpMem as usize)).copied().unwrap_or(usize::MAX)
     }
 
     fn LocalAlloc(uFlags: u32, uBytes: usize) -> *mut c_void {
