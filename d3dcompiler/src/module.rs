@@ -71,6 +71,16 @@ pub(crate) fn find_by_handle(handle: usize) -> Option<&'static Module> {
         .copied()
 }
 
+/// find_by_address for a signal handler, which must not wait on the lock: None while it is held
+pub(crate) fn try_find_by_address(addr: usize) -> Option<&'static Module> {
+    MODULES
+        .try_lock()
+        .ok()?
+        .iter()
+        .find(|m| addr >= m.base && addr < m.base + m.size)
+        .copied()
+}
+
 pub(crate) fn find_by_address(addr: usize) -> Option<&'static Module> {
     MODULES
         .lock()
@@ -128,44 +138,7 @@ pub(crate) fn describe(addr: usize) -> String {
     }
 }
 
-// In trace builds, a fault names the DLL and offset it happened at, and the return addresses
-// near the top of the stack
-#[cfg(feature = "trace-imports")]
-fn install_crash_report() {
-    unsafe extern "C" fn report(signal: i32, _info: *mut libc::siginfo_t, context: *mut c_void) {
-        let gregs = unsafe { &(*(context as *mut libc::ucontext_t)).uc_mcontext.gregs };
-        let (rip, rsp) = (
-            gregs[libc::REG_RIP as usize] as usize,
-            gregs[libc::REG_RSP as usize] as usize,
-        );
-        eprintln!(
-            "[d3dcompiler] signal {signal} at {} rsp=0x{rsp:x}",
-            describe(rip)
-        );
-        for i in 0..2048 {
-            let value = unsafe { *((rsp + i * 8) as *const usize) };
-            if find_by_address(value).is_some() {
-                eprintln!("[d3dcompiler]   [rsp+0x{:x}] {}", i * 8, describe(value));
-            }
-        }
-        unsafe { libc::signal(libc::SIGABRT, libc::SIG_DFL) };
-        std::process::abort();
-    }
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| unsafe {
-        let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = report as *const () as usize;
-        action.sa_flags = libc::SA_SIGINFO;
-        libc::sigaction(libc::SIGSEGV, &action, std::ptr::null_mut());
-        libc::sigaction(libc::SIGILL, &action, std::ptr::null_mut());
-        libc::sigaction(libc::SIGBUS, &action, std::ptr::null_mut());
-        libc::sigaction(libc::SIGABRT, &action, std::ptr::null_mut());
-    });
-}
-
 pub(crate) fn load_file(path: &Path) -> std::io::Result<&'static Module> {
-    #[cfg(feature = "trace-imports")]
-    install_crash_report();
     let name = normalise(&path.to_string_lossy());
     if let Some(m) = find(&name) {
         return Ok(m);
@@ -266,6 +239,7 @@ pub(crate) fn load(
     dll: &[u8],
     dir: Option<PathBuf>,
 ) -> Result<&'static Module, String> {
+    crate::fault::install();
     let pe = PeFile64::parse(dll).map_err(|e| e.to_string())?;
     let size = pe.nt_headers().optional_header.size_of_image() as usize;
     let header_size = pe.nt_headers().optional_header.size_of_headers() as usize;
@@ -378,6 +352,7 @@ pub(crate) fn load(
                     ),
                     Err(_) => (UNRESOLVED, "?".into()),
                 };
+                let addr = crate::fault::injected_fault(&dll_name, &what).unwrap_or(addr);
                 let addr = if addr == UNRESOLVED {
                     missing_import(&dll_name, &what)
                 } else {
