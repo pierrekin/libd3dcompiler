@@ -1563,6 +1563,9 @@ mod linux_loader {
             }
             "RtlVirtualUnwind" => imports::ntdll::RtlVirtualUnwind as *const () as usize,
             "RtlUnwindEx" => imports::ntdll::RtlUnwindEx as *const () as usize,
+            "RaiseException" => imports::ntdll::RaiseException as *const () as usize,
+            "RtlPcToFileHeader" => imports::ntdll::RtlPcToFileHeader as *const () as usize,
+            "RtlUnwind" => imports::ntdll::RtlUnwind as *const () as usize,
             _ => 0,
         }
     }
