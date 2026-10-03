@@ -463,6 +463,14 @@ pub unsafe extern "C" fn pe_load_library(path: *const std::ffi::c_char) -> *mut 
     }
 }
 
+// Prepares the calling thread to run code from the DLLs, which reads its Windows thread block and
+// implicit TLS. Loading a DLL or looking up a function does this for the thread that does it; any
+// other thread that calls into a DLL calls this first.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn pe_enter_thread() {
+    unsafe { crate::linux_loader::setup_tib() };
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn pe_get_proc_address(
     module: *mut c_void,
