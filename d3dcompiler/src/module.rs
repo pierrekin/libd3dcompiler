@@ -204,17 +204,27 @@ fn system_ordinal_name(dll: &str, ordinal: u32) -> Option<&'static str> {
 fn missing_import(dll: &str, what: &str) -> usize {
     #[cfg(feature = "trace-imports")]
     eprintln!("[MISSING] {dll}!{what}");
-    unsafe extern "C" fn report(name: *const std::ffi::c_char) -> ! {
+    // Names the import, and the DLL code that called it: the stub jumps here with the caller's
+    // stack, whose top is the return address, and the return addresses into DLLs above it
+    unsafe extern "C" fn report(name: *const std::ffi::c_char, rsp: *const usize) -> ! {
         eprintln!(
-            "[d3dcompiler] called an import nothing provides: {}",
-            unsafe { std::ffi::CStr::from_ptr(name).to_string_lossy() }
+            "[d3dcompiler] called an import nothing provides: {}, from {}",
+            unsafe { std::ffi::CStr::from_ptr(name).to_string_lossy() },
+            describe(unsafe { *rsp })
         );
+        for i in 1..512 {
+            let value = unsafe { *rsp.add(i) };
+            if find_by_address(value).is_some() {
+                eprintln!("[d3dcompiler]   [rsp+0x{:x}] {}", i * 8, describe(value));
+            }
+        }
         std::process::abort();
     }
     let name = std::ffi::CString::new(format!("{dll}!{what}"))
         .unwrap()
         .into_raw() as u64;
-    let mut code = vec![0x48, 0xBF];
+    // mov rsi, rsp; mov rdi, name; mov rax, report; jmp rax
+    let mut code = vec![0x48, 0x89, 0xE6, 0x48, 0xBF];
     code.extend_from_slice(&name.to_le_bytes());
     code.extend_from_slice(&[0x48, 0xB8]);
     code.extend_from_slice(&(report as *const () as u64).to_le_bytes());
