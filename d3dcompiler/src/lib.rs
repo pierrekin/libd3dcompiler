@@ -12,6 +12,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 #![recursion_limit = "256"]
 
+mod fault;
 mod imports;
 mod module;
 
