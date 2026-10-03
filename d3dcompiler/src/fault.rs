@@ -6,7 +6,9 @@
 use crate::module::{describe, find_by_address, try_find_by_address};
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 unsafe extern "C" {
     fn siglongjmp(env: *mut c_void, value: i32) -> !;
@@ -111,19 +113,86 @@ pub(crate) fn install() {
     });
 }
 
-/// The stand-in an import gets when LIBD3DCOMPILER_FAULT names it: calling it faults, to test that a
-/// caller recovers from a crash inside a compiler
-pub(crate) fn injected_fault(dll: &str, name: &str) -> Option<usize> {
-    // writes to address 8, which nothing maps
-    unsafe extern "win64" fn fault() {
-        unsafe { std::ptr::write_volatile(std::ptr::dangling_mut::<u64>(), 0) };
+// Writes to address 8, which nothing maps
+unsafe extern "win64" fn fault() {
+    unsafe { std::ptr::write_volatile(std::ptr::dangling_mut::<u64>(), 0) };
+}
+
+// The import an armed fault stands in front of, and the file that arms it
+static ARMED_IMPORT: AtomicUsize = AtomicUsize::new(0);
+static ARM_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+// Whether this call should fault: the first call after the arming file appears removes it and
+// faults, so one call faults across every process sharing the file. The file is looked for on
+// every 64th call, which keeps an armed hot import cheap.
+unsafe extern "win64" fn armed_should_fault() -> u8 {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    if !CALLS.fetch_add(1, Ordering::Relaxed).is_multiple_of(64) {
+        return 0;
     }
+    let Some(Some(file)) = ARM_FILE.get() else {
+        return 0;
+    };
+    // the DLLs' errno is this process's, and the import this stands in front of may not change it
+    let errno = unsafe { *libc::__errno_location() };
+    let fired = std::fs::remove_file(file).is_ok();
+    unsafe { *libc::__errno_location() = errno };
+    fired as u8
+}
+
+// Stands in front of the armed import: keeps its arguments, integer and floating-point, and either
+// faults or jumps on to the import with them untouched
+#[unsafe(naked)]
+unsafe extern "win64" fn armed() {
+    std::arch::naked_asm!(
+        "sub rsp, 0x88",
+        "mov [rsp+0x20], rcx",
+        "mov [rsp+0x28], rdx",
+        "mov [rsp+0x30], r8",
+        "mov [rsp+0x38], r9",
+        "movdqu [rsp+0x40], xmm0",
+        "movdqu [rsp+0x50], xmm1",
+        "movdqu [rsp+0x60], xmm2",
+        "movdqu [rsp+0x70], xmm3",
+        "call {should_fault}",
+        "mov rcx, [rsp+0x20]",
+        "mov rdx, [rsp+0x28]",
+        "mov r8, [rsp+0x30]",
+        "mov r9, [rsp+0x38]",
+        "movdqu xmm0, [rsp+0x40]",
+        "movdqu xmm1, [rsp+0x50]",
+        "movdqu xmm2, [rsp+0x60]",
+        "movdqu xmm3, [rsp+0x70]",
+        "add rsp, 0x88",
+        "test al, al",
+        "jnz {fault}",
+        "jmp qword ptr [rip + {import}]",
+        should_fault = sym armed_should_fault,
+        fault = sym fault,
+        import = sym ARMED_IMPORT,
+    )
+}
+
+/// The stand-in an import gets when LIBD3DCOMPILER_FAULT names it, to test that a caller recovers
+/// from a crash inside a compiler. Calling it faults. With LIBD3DCOMPILER_FAULT_ARM naming a file,
+/// the import works until that file appears, and then one call faults.
+pub(crate) fn injected_fault(dll: &str, name: &str, import: usize) -> Option<usize> {
     static FAULT: OnceLock<Option<String>> = OnceLock::new();
     let wanted = FAULT
         .get_or_init(|| std::env::var("LIBD3DCOMPILER_FAULT").ok())
         .as_deref()?;
-    (wanted == name || wanted.eq_ignore_ascii_case(&format!("{dll}!{name}")))
-        .then_some(fault as *const () as usize)
+    if wanted != name && !wanted.eq_ignore_ascii_case(&format!("{dll}!{name}")) {
+        return None;
+    }
+    let arm =
+        ARM_FILE.get_or_init(|| std::env::var_os("LIBD3DCOMPILER_FAULT_ARM").map(PathBuf::from));
+    if arm.is_none() {
+        return Some(fault as *const () as usize);
+    }
+    // The stub jumps on to one import. DLLs that link the same name to the same function all get
+    // it; one that links it elsewhere keeps its import unarmed.
+    let first = ARMED_IMPORT.compare_exchange(0, import, Ordering::Relaxed, Ordering::Relaxed);
+    (first.is_ok() || first == Err(import)).then_some(armed as *const () as usize)
 }
 
 // Registers where a fault in the DLLs on this thread jumps back to: a sigjmp_buf the caller set with

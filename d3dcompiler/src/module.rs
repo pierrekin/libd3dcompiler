@@ -352,7 +352,11 @@ pub(crate) fn load(
                     ),
                     Err(_) => (UNRESOLVED, "?".into()),
                 };
-                let addr = crate::fault::injected_fault(&dll_name, &what).unwrap_or(addr);
+                let addr = if addr == UNRESOLVED {
+                    addr
+                } else {
+                    crate::fault::injected_fault(&dll_name, &what, addr).unwrap_or(addr)
+                };
                 let addr = if addr == UNRESOLVED {
                     missing_import(&dll_name, &what)
                 } else {
