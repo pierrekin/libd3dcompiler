@@ -1,6 +1,26 @@
 use super::*;
 use std::cell::Cell;
 
+// The C runtime's character classes for the "C" locale, as Microsoft's runtime returns them:
+// _UPPER 0x1, _LOWER 0x2, _DIGIT 0x4, _SPACE 0x8, _PUNCT 0x10, _CONTROL 0x20, _BLANK 0x40, _HEX 0x80,
+// _ALPHA 0x100. The is* functions return the class bits they test, not just non-zero, and callers
+// can keep only the low byte, so glibc's values, which use other bits, read as false there.
+fn ctype(c: i32) -> i32 {
+    match c {
+        0x41..=0x46 => 0x181,
+        0x47..=0x5A => 0x101,
+        0x61..=0x66 => 0x182,
+        0x67..=0x7A => 0x102,
+        0x30..=0x39 => 0x84,
+        0x20 => 0x48,
+        0x09 => 0x68,
+        0x0A..=0x0D => 0x28,
+        0x00..=0x08 | 0x0E..=0x1F | 0x7F => 0x20,
+        0x21..=0x2F | 0x3A..=0x40 | 0x5B..=0x60 | 0x7B..=0x7E => 0x10,
+        _ => 0,
+    }
+}
+
 // ============ msvcrt - memory ============
 
 static ERRNO_VAL: AtomicU32 = AtomicU32::new(0);
@@ -210,17 +230,19 @@ import_fn! {
 
     fn isalnum(c: i32) -> i32 {
         trace_call!("msvcrt!isalnum");
-        libc::isalnum(c)
+        ctype(c) & 0x107
     }
 
     fn isalpha(c: i32) -> i32 {
-        trace_call!("msvcrt!isalpha");
-        libc::isalpha(c)
+        let r = ctype(c) & 0x103;
+        trace_call!("msvcrt!isalpha", "c=0x{:x} -> 0x{:x}", c, r);
+        r
     }
 
     fn isdigit(c: i32) -> i32 {
-        trace_call!("msvcrt!isdigit");
-        libc::isdigit(c)
+        let r = ctype(c) & 0x4;
+        trace_call!("msvcrt!isdigit", "c=0x{:x} -> 0x{:x}", c, r);
+        r
     }
 
     fn iswdigit(c: u16) -> i32 {
@@ -230,12 +252,12 @@ import_fn! {
 
     fn isspace(c: i32) -> i32 {
         trace_call!("msvcrt!isspace");
-        libc::isspace(c)
+        ctype(c) & 0x8
     }
 
     fn isxdigit(c: i32) -> i32 {
         trace_call!("msvcrt!isxdigit");
-        libc::isxdigit(c)
+        ctype(c) & 0x80
     }
 
     fn __isascii(c: i32) -> i32 {
