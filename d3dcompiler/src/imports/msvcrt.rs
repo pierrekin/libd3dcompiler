@@ -1245,7 +1245,18 @@ unsafe extern "win64" fn sprintf_s_impl(
     argptr: *const u64,
 ) -> i32 {
     trace_call!("msvcrt!sprintf_s");
-    super::printf::vsnprintf_core(buffer, size, format, argptr)
+    // Text that does not fit is an invalid parameter: the buffer is emptied and -1 returned
+    let text = super::printf::format(format, argptr);
+    if buffer.is_null() || size == 0 {
+        return -1;
+    }
+    if text.len() >= size {
+        *buffer = 0;
+        return -1;
+    }
+    std::ptr::copy_nonoverlapping(text.as_ptr(), buffer as *mut u8, text.len());
+    *buffer.add(text.len()) = 0;
+    text.len() as i32
 }
 
 #[unsafe(naked)]
@@ -1474,39 +1485,26 @@ unsafe fn common_vsprintf(
     format: *const i8,
     arglist: *mut c_void,
 ) -> i32 {
-    let mut scratch = vec![0i8; 1024];
-    let len = loop {
-        let n = super::printf::vsnprintf_core(
-            scratch.as_mut_ptr(),
-            scratch.len(),
-            format,
-            arglist as *const u64,
-        );
-        if n >= 0 && (n as usize) < scratch.len() - 1 {
-            break n as usize;
-        }
-        if scratch.len() >= 1 << 24 {
-            return -1;
-        }
-        scratch.resize(scratch.len() * 4, 0);
-    };
+    let scratch = super::printf::format(format, arglist as *const u64);
+    let len = scratch.len();
     if buffer.is_null() || count == 0 {
         return len as i32;
     }
     if len < count {
-        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, len + 1);
+        std::ptr::copy_nonoverlapping(scratch.as_ptr() as *const i8, buffer, len);
+        *buffer.add(len) = 0;
         return len as i32;
     }
     if len == count && options & 1 != 0 {
-        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, len);
+        std::ptr::copy_nonoverlapping(scratch.as_ptr() as *const i8, buffer, len);
         return len as i32;
     }
     if options & 2 != 0 {
-        std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, count - 1);
+        std::ptr::copy_nonoverlapping(scratch.as_ptr() as *const i8, buffer, count - 1);
         *buffer.add(count - 1) = 0;
         return len as i32;
     }
-    std::ptr::copy_nonoverlapping(scratch.as_ptr(), buffer, count);
+    std::ptr::copy_nonoverlapping(scratch.as_ptr() as *const i8, buffer, count);
     -1
 }
 
