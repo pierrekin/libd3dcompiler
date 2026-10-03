@@ -97,8 +97,9 @@ import_fn! {
     }
 
     fn memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> i32 {
-        trace_call!("msvcrt!memcmp", "s1={:p}, s2={:p}, n={}", s1, s2, n);
-        libc::memcmp(s1, s2, n)
+        let r = libc::memcmp(s1, s2, n);
+        trace_call!("msvcrt!memcmp", "n={} -> {}", n, r);
+        r
     }
 
     fn _memicmp(s1: *const c_void, s2: *const c_void, n: usize) -> i32 {
@@ -118,13 +119,15 @@ import_fn! {
     // ============ msvcrt - string ============
 
     fn strcmp(s1: *const i8, s2: *const i8) -> i32 {
-        trace_call!("msvcrt!strcmp");
-        libc::strcmp(s1, s2)
+        let r = libc::strcmp(s1, s2);
+        trace_call!("msvcrt!strcmp", "-> {}", r);
+        r
     }
 
     fn strncmp(s1: *const i8, s2: *const i8, n: usize) -> i32 {
-        trace_call!("msvcrt!strncmp");
-        libc::strncmp(s1, s2, n)
+        let r = libc::strncmp(s1, s2, n);
+        trace_call!("msvcrt!strncmp", "-> {}", r);
+        r
     }
 
     fn strcpy_s(dst: *mut i8, dst_size: usize, src: *const i8) -> i32 {
@@ -174,18 +177,21 @@ import_fn! {
     }
 
     fn strchr(s: *const i8, c: i32) -> *mut i8 {
-        trace_call!("msvcrt!strchr");
-        libc::strchr(s, c)
+        let r = libc::strchr(s, c);
+        trace_call!("msvcrt!strchr", "-> {}", if r.is_null() { "null" } else { "found" });
+        r
     }
 
     fn strrchr(s: *const i8, c: i32) -> *mut i8 {
-        trace_call!("msvcrt!strrchr");
-        libc::strrchr(s, c)
+        let r = libc::strrchr(s, c);
+        trace_call!("msvcrt!strrchr", "-> {}", if r.is_null() { "null" } else { "found" });
+        r
     }
 
     fn strstr(haystack: *const i8, needle: *const i8) -> *mut i8 {
-        trace_call!("msvcrt!strstr");
-        libc::strstr(haystack, needle)
+        let r = libc::strstr(haystack, needle);
+        trace_call!("msvcrt!strstr", "-> {}", if r.is_null() { "null" } else { "found" });
+        r
     }
 
     fn strnlen(s: *const i8, max_len: usize) -> usize {
@@ -199,13 +205,15 @@ import_fn! {
     }
 
     fn _stricmp(s1: *const i8, s2: *const i8) -> i32 {
-        trace_call!("msvcrt!_stricmp");
-        libc::strcasecmp(s1, s2)
+        let r = libc::strcasecmp(s1, s2);
+        trace_call!("msvcrt!_stricmp", "{:?} {:?} -> {}", std::ffi::CStr::from_ptr(s1), std::ffi::CStr::from_ptr(s2), r);
+        r
     }
 
     fn _strnicmp(s1: *const i8, s2: *const i8, n: usize) -> i32 {
-        trace_call!("msvcrt!_strnicmp");
-        libc::strncasecmp(s1, s2, n)
+        let r = libc::strncasecmp(s1, s2, n);
+        trace_call!("msvcrt!_strnicmp", "-> {}", r);
+        r
     }
 
     fn tolower(c: i32) -> i32 {
@@ -214,8 +222,9 @@ import_fn! {
     }
 
     fn toupper(c: i32) -> i32 {
-        trace_call!("msvcrt!toupper");
-        libc::toupper(c)
+        let r = libc::toupper(c);
+        trace_call!("msvcrt!toupper", "c=0x{:x} -> 0x{:x}", c, r);
+        r
     }
 
     fn towlower(c: u32) -> u32 {
@@ -799,8 +808,9 @@ import_fn! {
     }
 
     fn _atoi64(s: *const i8) -> i64 {
-        trace_call!("msvcrt!_atoi64");
-        libc::strtoll(s, std::ptr::null_mut(), 10)
+        let r = libc::strtoll(s, std::ptr::null_mut(), 10);
+        trace_call!("msvcrt!_atoi64", "{:?} -> {}", std::ffi::CStr::from_ptr(s), r);
+        r
     }
 
     fn strtod(s: *const i8, endptr: *mut *mut i8) -> f64 {
