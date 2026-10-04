@@ -939,6 +939,38 @@ import_fn! {
         }
     }
 
+    // The UCRT's FP_ classes, which differ from C's: FP_INFINITE 1, FP_NAN 2, FP_NORMAL -1,
+    // FP_SUBNORMAL -2, FP_ZERO 0
+    fn _dclass(x: f64) -> i16 {
+        trace_call!("ucrt!_dclass");
+        if x.is_nan() {
+            2
+        } else if x.is_infinite() {
+            1
+        } else if x == 0.0 {
+            0
+        } else if x.is_subnormal() {
+            -2
+        } else {
+            -1
+        }
+    }
+
+    fn _fdclass(x: f32) -> i16 {
+        trace_call!("ucrt!_fdclass");
+        if x.is_nan() {
+            2
+        } else if x.is_infinite() {
+            1
+        } else if x == 0.0 {
+            0
+        } else if x.is_subnormal() {
+            -2
+        } else {
+            -1
+        }
+    }
+
     fn _clearfp() -> u32 {
         trace_call!("msvcrt!_clearfp");
         0

@@ -1319,6 +1319,8 @@ mod linux_loader {
             "_isnan" => imports::msvcrt::_isnan as *const () as usize,
             "_finite" => imports::msvcrt::_finite as *const () as usize,
             "_fpclass" => imports::msvcrt::_fpclass as *const () as usize,
+            "_dclass" => imports::msvcrt::_dclass as *const () as usize,
+            "_fdclass" => imports::msvcrt::_fdclass as *const () as usize,
             "_clearfp" => imports::msvcrt::_clearfp as *const () as usize,
             "_controlfp" => imports::msvcrt::_controlfp as *const () as usize,
 
