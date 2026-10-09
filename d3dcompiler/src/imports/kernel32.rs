@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicU64;
 
 static EXCEPTION_FILTER: AtomicU64 = AtomicU64::new(0);
 const PROCESS_HEAP: u32 = 0x12345678;
-static HEAP_NEXT: AtomicU32 = AtomicU32::new(PROCESS_HEAP);
+static HEAP_NEXT: AtomicU32 = AtomicU32::new(PROCESS_HEAP + 1);
 static HEAP_ALLOCS: OnceLock<Mutex<HashMap<u32, Vec<usize>>>> = OnceLock::new();
 fn heap_table() -> &'static Mutex<HashMap<u32, Vec<usize>>> {
     HEAP_ALLOCS.get_or_init(|| Mutex::new(HashMap::new()))
