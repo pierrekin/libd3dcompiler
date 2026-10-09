@@ -10,6 +10,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::missing_transmute_annotations)]
 #![allow(unsafe_op_in_unsafe_fn)]
+#![recursion_limit = "256"]
 
 mod imports;
 
