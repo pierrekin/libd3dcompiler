@@ -112,6 +112,12 @@ import_fn! {
         }
     }
 
+    fn GetVersion() -> u32 {
+        trace_call!("kernel32!GetVersion");
+        // 6.2 build 9200
+        (9200 << 16) | (2 << 8) | 6
+    }
+
     // ============ KERNEL32 - file (narrow) ============
 
     fn CreateFileA(
@@ -604,6 +610,40 @@ import_fn! {
             }
         } else {
             0
+        }
+    }
+
+    fn CopyFileExW(
+        lpExistingFileName: *const u16,
+        lpNewFileName: *const u16,
+        _lpProgressRoutine: *const c_void,
+        _lpData: *mut c_void,
+        _pbCancel: *mut i32,
+        dwCopyFlags: u32,
+    ) -> i32 {
+        trace_call!("kernel32!CopyFileExW", "flags={:#x}", dwCopyFlags);
+        use std::os::unix::ffi::OsStrExt;
+        let src = wstr_to_string(lpExistingFileName);
+        let dst = wstr_to_string(lpNewFileName);
+        let src = std::path::Path::new(std::ffi::OsStr::from_bytes(&src[..src.len() - 1]));
+        let dst = std::path::Path::new(std::ffi::OsStr::from_bytes(&dst[..dst.len() - 1]));
+
+        // COPY_FILE_FAIL_IF_EXISTS
+        if dwCopyFlags & 1 != 0 && dst.exists() {
+            LAST_ERROR.store(80, Ordering::SeqCst); // ERROR_FILE_EXISTS
+            return 0;
+        }
+        match std::fs::copy(src, dst) {
+            Ok(_) => 1,
+            Err(e) => {
+                let code = match e.kind() {
+                    std::io::ErrorKind::NotFound => 2,         // ERROR_FILE_NOT_FOUND
+                    std::io::ErrorKind::PermissionDenied => 5, // ERROR_ACCESS_DENIED
+                    _ => 31,                                   // ERROR_GEN_FAILURE
+                };
+                LAST_ERROR.store(code, Ordering::SeqCst);
+                0
+            }
         }
     }
 

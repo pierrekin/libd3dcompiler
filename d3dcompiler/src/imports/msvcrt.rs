@@ -32,6 +32,26 @@ import_fn! {
         libc::free(ptr)
     }
 
+    fn op_new(size: usize) -> *mut c_void {
+        trace_call!("msvcrt!operator new", "size={}", size);
+        libc::malloc(size.max(1))
+    }
+
+    fn op_delete(ptr: *mut c_void) {
+        trace_call!("msvcrt!operator delete", "ptr={:p}", ptr);
+        libc::free(ptr)
+    }
+
+    fn op_new_array(size: usize) -> *mut c_void {
+        trace_call!("msvcrt!operator new[]", "size={}", size);
+        libc::malloc(size.max(1))
+    }
+
+    fn op_delete_array(ptr: *mut c_void) {
+        trace_call!("msvcrt!operator delete[]", "ptr={:p}", ptr);
+        libc::free(ptr)
+    }
+
     fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
         trace_call!("msvcrt!memcpy", "dst={:p}, src={:p}, n={}", dst, src, n);
         libc::memcpy(dst, src, n)
@@ -203,6 +223,11 @@ import_fn! {
         libc::isdigit(c)
     }
 
+    fn iswdigit(c: u16) -> i32 {
+        trace_call!("msvcrt!iswdigit");
+        matches!(c, 0x30..=0x39) as i32
+    }
+
     fn isspace(c: i32) -> i32 {
         trace_call!("msvcrt!isspace");
         libc::isspace(c)
@@ -327,6 +352,20 @@ import_fn! {
         last
     }
 
+    fn wcschr(s: *const u16, c: u16) -> *mut u16 {
+        trace_call!("msvcrt!wcschr");
+        let mut p = s;
+        loop {
+            if *p == c {
+                return p as *mut u16;
+            }
+            if *p == 0 {
+                return std::ptr::null_mut();
+            }
+            p = p.add(1);
+        }
+    }
+
     fn _wcsdup(s: *const u16) -> *mut u16 {
         trace_call!("msvcrt!_wcsdup");
         let mut len = 0;
@@ -419,6 +458,16 @@ import_fn! {
     ) -> i32 {
         trace_call!("msvcrt!_vsnprintf");
         super::printf::vsnprintf_core(buffer, count, format, argptr as *const u64)
+    }
+
+    fn vsprintf_s(
+        buffer: *mut i8,
+        size: usize,
+        format: *const i8,
+        argptr: *mut c_void,
+    ) -> i32 {
+        trace_call!("msvcrt!vsprintf_s");
+        super::printf::vsnprintf_core(buffer, size, format, argptr as *const u64)
     }
 
     fn _vsnwprintf(
@@ -527,6 +576,48 @@ import_fn! {
     fn _chsize_s(fd: i32, size: i64) -> i32 {
         trace_call!("msvcrt!_chsize_s", "fd={}, size={}", fd, size);
         libc::ftruncate(fd, size)
+    }
+
+    fn _chsize(fd: i32, size: i32) -> i32 {
+        trace_call!("msvcrt!_chsize", "fd={}, size={}", fd, size);
+        libc::ftruncate(fd, size as i64)
+    }
+
+    // pmode is variadic but only read with _O_CREAT, so taking it as a 4th arg is fine
+    fn _wsopen(filename: *const u16, oflag: i32, _shflag: i32, pmode: i32) -> i32 {
+        trace_call!("msvcrt!_wsopen", "oflag={:#x}, pmode={:#x}", oflag, pmode);
+        let path = wstr_to_string(filename);
+
+        let mut flags = match oflag & 3 {
+            1 => libc::O_WRONLY,
+            2 => libc::O_RDWR,
+            _ => libc::O_RDONLY,
+        };
+        if oflag & 0x0008 != 0 {
+            flags |= libc::O_APPEND;
+        }
+        if oflag & 0x0080 != 0 {
+            flags |= libc::O_CLOEXEC; // _O_NOINHERIT
+        }
+        if oflag & 0x0100 != 0 {
+            flags |= libc::O_CREAT;
+        }
+        if oflag & 0x0200 != 0 {
+            flags |= libc::O_TRUNC;
+        }
+        if oflag & 0x0400 != 0 {
+            flags |= libc::O_EXCL;
+        }
+
+        // _S_IWRITE (0x80) controls whether the file is writable
+        let mode = if pmode & 0x80 != 0 { 0o666 } else { 0o444 };
+        let fd = libc::open(path.as_ptr() as *const i8, flags, mode);
+
+        // _O_TEMPORARY: delete when closed, which unlinking now gives us
+        if fd >= 0 && oflag & 0x0040 != 0 {
+            libc::unlink(path.as_ptr() as *const i8);
+        }
+        fd
     }
 
     fn _get_osfhandle(fd: i32) -> isize {
@@ -700,6 +791,17 @@ import_fn! {
         trace_call!("msvcrt!wcstoul");
         let narrow = wstr_to_string(s);
         libc::strtoul(narrow.as_ptr() as *const i8, std::ptr::null_mut(), base) as u64
+    }
+
+    fn wcstol(s: *const u16, endptr: *mut *mut u16, base: i32) -> i32 {
+        trace_call!("msvcrt!wcstol");
+        let narrow = wstr_to_string(s);
+        let mut end: *mut i8 = std::ptr::null_mut();
+        let v = libc::strtol(narrow.as_ptr() as *const i8, &mut end, base);
+        if !endptr.is_null() {
+            *endptr = s.add(end.offset_from(narrow.as_ptr() as *const i8) as usize) as *mut u16;
+        }
+        v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
     }
 
     fn _strtoui64(s: *const i8, endptr: *mut *mut i8, base: i32) -> u64 {
@@ -954,4 +1056,40 @@ unsafe extern "win64" fn sprintf_s_impl(
 ) -> i32 {
     trace_call!("msvcrt!sprintf_s");
     super::printf::vsnprintf_core(buffer, size, format, argptr)
+}
+
+#[unsafe(naked)]
+pub unsafe extern "win64" fn sscanf() -> i32 {
+    std::arch::naked_asm!(
+        "mov [rsp+0x18], r8",
+        "mov [rsp+0x20], r9",
+        "lea r8, [rsp+0x18]",
+        "jmp {impl_fn}",
+        impl_fn = sym sscanf_impl,
+    )
+}
+
+unsafe extern "win64" fn sscanf_impl(
+    buffer: *const i8,
+    format: *const i8,
+    argptr: *const u64,
+) -> i32 {
+    trace_call!("msvcrt!sscanf");
+    // scanf args are all pointers, so forward a fixed number and let the format pick how many get used
+    // MS size prefixes (%I64, 32-bit %l) are not translated.
+    let a = |i| unsafe { *argptr.add(i) as *mut c_void };
+    unsafe {
+        libc::sscanf(
+            buffer,
+            format,
+            a(0),
+            a(1),
+            a(2),
+            a(3),
+            a(4),
+            a(5),
+            a(6),
+            a(7),
+        )
+    }
 }

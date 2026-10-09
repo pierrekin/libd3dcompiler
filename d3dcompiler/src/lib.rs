@@ -1143,6 +1143,7 @@ mod linux_loader {
         }
 
         // Fix up imports
+        let mut unresolved = Vec::new();
         if let Ok(Some(import_table)) = obj_file.import_table()
             && let Ok(mut import_descs) = import_table.descriptors()
         {
@@ -1161,7 +1162,11 @@ mod linux_loader {
                     while let Ok(Some(thunk)) = thunks.next::<ImageNtHeaders64>() {
                         if let Ok((_hint, name)) = import_table.hint_name(thunk.address()) {
                             let name = String::from_utf8_lossy(name).to_string();
-                            let fn_addr = resolve_import(&dll_name, &name);
+                            let Some(fn_addr) = resolve_import(&dll_name, &name) else {
+                                unresolved.push(format!("{dll_name}!{name}"));
+                                address += 8;
+                                continue;
+                            };
                             if address + 8 <= mmap.len() {
                                 mmap[address..address + 8].copy_from_slice(&fn_addr.to_le_bytes());
                             }
@@ -1170,6 +1175,13 @@ mod linux_loader {
                     }
                 }
             }
+        }
+        if !unresolved.is_empty() {
+            panic!(
+                "d3dcompiler_47.dll has {} unimplemented imports: {}",
+                unresolved.len(),
+                unresolved.join(", ")
+            );
         }
 
         // Build export table
@@ -1286,17 +1298,13 @@ mod linux_loader {
         }
     }
 
-    // Import resolver - resolves by DLL name and import name
-    fn resolve_import(dll: &str, name: &str) -> usize {
-        // Log the import resolution
-        // eprintln!("[d3dcompiler] Resolving {}!{}", dll, name);
-
+    // Import resolver - resolves by DLL name and import name, None if no shim exists
+    fn resolve_import(dll: &str, name: &str) -> Option<usize> {
         // Normalize DLL name (remove .dll extension if present)
         let dll_base = dll.trim_end_matches(".dll");
 
-        // Log the resolved address
-        // eprintln!("[d3dcompiler]   {}!{} -> 0x{:x}", dll, name, addr);
-        match dll_base {
+        // Per-DLL resolvers return 0 for unknown names
+        let addr = match dll_base {
             "msvcrt"
             | "msvcr100"
             | "msvcr110"
@@ -1341,8 +1349,9 @@ mod linux_loader {
             }
             "ntdll" => resolve_ntdll(name),
             "rpcrt4" => resolve_rpcrt4(name),
-            _ => 0xDEADBEEF,
-        }
+            _ => 0,
+        };
+        (addr != 0).then_some(addr)
     }
 
     fn resolve_msvcrt(name: &str) -> usize {
@@ -1350,6 +1359,10 @@ mod linux_loader {
             // memory
             "malloc" => imports::msvcrt::malloc as *const () as usize,
             "free" => imports::msvcrt::free as *const () as usize,
+            "??2@YAPEAX_K@Z" => imports::msvcrt::op_new as *const () as usize,
+            "??3@YAXPEAX@Z" => imports::msvcrt::op_delete as *const () as usize,
+            "??_U@YAPEAX_K@Z" => imports::msvcrt::op_new_array as *const () as usize,
+            "??_V@YAXPEAX@Z" => imports::msvcrt::op_delete_array as *const () as usize,
             "memcpy" => imports::msvcrt::memcpy as *const () as usize,
             "memcpy_s" => imports::msvcrt::memcpy_s as *const () as usize,
             "memmove" => imports::msvcrt::memmove as *const () as usize,
@@ -1377,6 +1390,7 @@ mod linux_loader {
             "isalnum" => imports::msvcrt::isalnum as *const () as usize,
             "isalpha" => imports::msvcrt::isalpha as *const () as usize,
             "isdigit" => imports::msvcrt::isdigit as *const () as usize,
+            "iswdigit" => imports::msvcrt::iswdigit as *const () as usize,
             "isspace" => imports::msvcrt::isspace as *const () as usize,
             "isxdigit" => imports::msvcrt::isxdigit as *const () as usize,
             "__isascii" => imports::msvcrt::__isascii as *const () as usize,
@@ -1387,6 +1401,7 @@ mod linux_loader {
             "wcsncat_s" => imports::msvcrt::wcsncat_s as *const () as usize,
             "wcscat_s" => imports::msvcrt::wcscat_s as *const () as usize,
             "wcscpy_s" => imports::msvcrt::wcscpy_s as *const () as usize,
+            "wcschr" => imports::msvcrt::wcschr as *const () as usize,
             "wcsrchr" => imports::msvcrt::wcsrchr as *const () as usize,
             "_wcsdup" => imports::msvcrt::_wcsdup as *const () as usize,
             "_wcsicmp" => imports::msvcrt::_wcsicmp as *const () as usize,
@@ -1396,6 +1411,8 @@ mod linux_loader {
 
             // printf/scanf
             "sprintf_s" => imports::msvcrt::sprintf_s as *const () as usize,
+            "sscanf" => imports::msvcrt::sscanf as *const () as usize,
+            "vsprintf_s" => imports::msvcrt::vsprintf_s as *const () as usize,
             "sscanf_s" => imports::msvcrt::sscanf_s as *const () as usize,
             "swprintf_s" => imports::msvcrt::swprintf_s as *const () as usize,
             "_vsnprintf" => imports::msvcrt::_vsnprintf as *const () as usize,
@@ -1415,6 +1432,8 @@ mod linux_loader {
             "_close" => imports::msvcrt::_close as *const () as usize,
             "_lseeki64" => imports::msvcrt::_lseeki64 as *const () as usize,
             "_chsize_s" => imports::msvcrt::_chsize_s as *const () as usize,
+            "_chsize" => imports::msvcrt::_chsize as *const () as usize,
+            "_wsopen" => imports::msvcrt::_wsopen as *const () as usize,
             "_get_osfhandle" => imports::msvcrt::_get_osfhandle as *const () as usize,
             "_open_osfhandle" => imports::msvcrt::_open_osfhandle as *const () as usize,
 
@@ -1451,6 +1470,7 @@ mod linux_loader {
             "strtod" => imports::msvcrt::strtod as *const () as usize,
             "strtoul" => imports::msvcrt::strtoul as *const () as usize,
             "wcstoul" => imports::msvcrt::wcstoul as *const () as usize,
+            "wcstol" => imports::msvcrt::wcstol as *const () as usize,
             "_strtoui64" => imports::msvcrt::_strtoui64 as *const () as usize,
 
             // other
@@ -1485,7 +1505,7 @@ mod linux_loader {
             "_wfullpath" => imports::msvcrt::_wfullpath as *const () as usize,
             "_wmakepath_s" => imports::msvcrt::_wmakepath_s as *const () as usize,
             "_wsplitpath_s" => imports::msvcrt::_wsplitpath_s as *const () as usize,
-            _ => 0xDEADBEEF,
+            _ => 0,
         }
     }
 
@@ -1514,6 +1534,7 @@ mod linux_loader {
             "SetFilePointer" => imports::kernel32::SetFilePointer as *const () as usize,
             "SetFilePointerEx" => imports::kernel32::SetFilePointerEx as *const () as usize,
             "SetEndOfFile" => imports::kernel32::SetEndOfFile as *const () as usize,
+            "CopyFileExW" => imports::kernel32::CopyFileExW as *const () as usize,
             "DeleteFileW" => imports::kernel32::DeleteFileW as *const () as usize,
             "GetFileAttributesW" => imports::kernel32::GetFileAttributesW as *const () as usize,
             "SetFileAttributesW" => imports::kernel32::SetFileAttributesW as *const () as usize,
@@ -1585,11 +1606,16 @@ mod linux_loader {
             "SetUnhandledExceptionFilter" => {
                 imports::kernel32::SetUnhandledExceptionFilter as *const () as usize
             }
+            "GetVersion" => imports::kernel32::GetVersion as *const () as usize,
             "IsDebuggerPresent" => imports::kernel32::IsDebuggerPresent as *const () as usize,
             "IsProcessorFeaturePresent" => {
                 imports::kernel32::IsProcessorFeaturePresent as *const () as usize
             }
-            _ => 0xDEADBEEF,
+
+            "RtlCaptureContext" | "RtlLookupFunctionEntry" | "RtlVirtualUnwind" => {
+                resolve_ntdll(name)
+            }
+            _ => 0,
         }
     }
 
@@ -1610,7 +1636,7 @@ mod linux_loader {
             "CryptDestroyHash" => imports::advapi32::CryptDestroyHash as *const () as usize,
             "CryptHashData" => imports::advapi32::CryptHashData as *const () as usize,
             "CryptGetHashParam" => imports::advapi32::CryptGetHashParam as *const () as usize,
-            _ => 0xDEADBEEF,
+            _ => 0,
         }
     }
 
@@ -1622,14 +1648,14 @@ mod linux_loader {
             }
             "RtlVirtualUnwind" => imports::ntdll::RtlVirtualUnwind as *const () as usize,
             "RtlUnwindEx" => imports::ntdll::RtlUnwindEx as *const () as usize,
-            _ => 0xDEADBEEF,
+            _ => 0,
         }
     }
 
     fn resolve_rpcrt4(name: &str) -> usize {
         match name {
             "UuidCreate" => imports::rpcrt4::UuidCreate as *const () as usize,
-            _ => 0xDEADBEEF,
+            _ => 0,
         }
     }
 }
